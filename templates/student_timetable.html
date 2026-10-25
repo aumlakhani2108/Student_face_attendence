@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Lecture Timetable · {{ student.name }}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .timetable-shell {
+      max-width: 1140px;
+      margin: 0 auto;
+    }
+    .badge-live {
+      background: #dc3545;
+      animation: pulse 1.8s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.6; }
+      100% { opacity: 1; }
+    }
+    .session-card {
+      border-left: 4px solid #0071e3;
+    }
+    .session-card.attended {
+      border-left-color: #2e7d32;
+    }
+    .session-card.live {
+      border-left-color: #dc3545;
+    }
+  </style>
+</head>
+<body>
+<div class="timetable-shell my-3">
+  <!-- Nav Bar -->
+  <nav class="card p-3 mb-4 d-flex flex-row justify-content-between align-items-center">
+    <div class="d-flex align-items-center gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('student_dashboard') }}">&larr; Dashboard</a>
+      <h5 class="mb-0 ms-2">Lecture Timetable</h5>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <span class="text-muted small d-none d-md-inline">Today: <strong>{{ today }}</strong></span>
+      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('student_download_pdf') }}">Export PDF</a>
+      <form method="post" action="{{ url_for('logout') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-outline-secondary btn-sm" type="submit">Sign Out</button>
+      </form>
+    </div>
+  </nav>
+
+  <!-- Timetable Banner -->
+  <div class="card p-4 shadow-sm mb-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <h4 class="mb-1">Class Schedule & Timetable</h4>
+        <p class="text-muted mb-0 small">
+          Enrolled student: <strong>{{ student.name }}</strong> (Roll: {{ student.roll or 'N/A' }} | Class: {{ student.class or 'General' }} {{ student.section or '' }})
+        </p>
+      </div>
+      <div>
+        <span class="badge bg-light text-dark border px-3 py-2">
+          Total Lectures: {{ classes|length }}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timetable List -->
+  <div class="card p-4 shadow-sm mb-4">
+    {% if classes %}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-dark">
+            <tr>
+              <th>Class / Subject</th>
+              <th>Date</th>
+              <th>Schedule Window</th>
+              <th>Faculty</th>
+              <th>Room</th>
+              <th>Session Status</th>
+              <th>Your Attendance</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for c in classes %}
+            <tr>
+              <td>
+                <span class="fw-semibold text-dark">{{ c.name }}</span>
+              </td>
+              <td>
+                {% if c.class_date == today %}
+                  <span class="badge bg-primary">Today</span> {{ c.class_date }}
+                {% else %}
+                  {{ c.class_date }}
+                {% endif %}
+              </td>
+              <td>{{ c.class_time }} &ndash; {{ c.end_time }}</td>
+              <td>{{ c.faculty }}</td>
+              <td>{{ c.room or 'Room 101' }}</td>
+              <td>
+                {% if c.display_status == 'Live Now' %}
+                  <span class="badge badge-live">LIVE NOW</span>
+                {% elif c.display_status == 'Upcoming' %}
+                  <span class="badge bg-info text-dark">Upcoming</span>
+                {% else %}
+                  <span class="badge bg-secondary">Completed</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if c.attended %}
+                  <span class="badge bg-success">&#10003; PRESENT</span>
+                {% elif c.display_status == 'Live Now' %}
+                  <span class="badge bg-warning text-dark">&#9203; In Session (Show Face)</span>
+                {% elif c.display_status == 'Upcoming' %}
+                  <span class="badge bg-light text-muted border">Scheduled</span>
+                {% else %}
+                  <span class="badge bg-danger">&#10007; ABSENT</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-center py-5 text-muted">
+        <p class="mb-1">No scheduled classes found.</p>
+        <small>When your instructor schedules classes for your cohort, they will be listed here.</small>
+      </div>
+    {% endif %}
+  </div>
+
+  <footer class="text-center text-muted small py-2">
+    Digital Facial Recognition Attendance System &middot; PresentSync
+  </footer>
+</div>
+</body>
+</html>

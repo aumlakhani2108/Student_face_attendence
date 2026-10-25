@@ -4,38 +4,120 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f3f6ff">
-  <title>Admin login · Attendly</title>
+  <title>Sign In · PresentSync Attendance</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .portal-tabs {
+      display: flex;
+      background: #f2f2f7;
+      border-radius: 12px;
+      padding: 4px;
+      margin-bottom: 24px;
+      gap: 4px;
+      border: 1px solid #e5e5ea;
+    }
+    .portal-tab-btn {
+      flex: 1;
+      border: none;
+      background: transparent;
+      padding: 10px 14px;
+      border-radius: 9px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: #6c757d;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .portal-tab-btn.active {
+      background: #ffffff;
+      color: #0071e3;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+    .portal-panel {
+      display: none;
+      animation: fadeIn 0.25s ease;
+    }
+    .portal-panel.active {
+      display: block;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .role-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 4px 10px;
+      border-radius: 20px;
+      margin-bottom: 12px;
+    }
+    .role-badge.student {
+      background: #e8f3ff;
+      color: #0071e3;
+    }
+    .role-badge.admin {
+      background: #fbf0ea;
+      color: #bf4800;
+    }
+    .notice-card {
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 0.83rem;
+      line-height: 1.45;
+      margin-top: 18px;
+      border: 1px solid transparent;
+    }
+    .notice-card.student-notice {
+      background: #f7f9fc;
+      border-color: #e2e8f0;
+      color: #475569;
+    }
+    .notice-card.admin-notice {
+      background: #fcfaf7;
+      border-color: #faebd7;
+      color: #6c5a4b;
+    }
+  </style>
 </head>
 <body class="login-page">
 <main class="login-shell">
-  <section class="login-illustration" aria-label="Digital attendance for a brighter school day">
+  <section class="login-illustration" aria-label="Digital attendance for modern education">
     <div class="login-illustration-shade"></div>
-    <div class="login-brand login-brand-light">
-      <span class="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 48 48" fill="none">
-          <rect x="3" y="3" width="42" height="42" rx="15" fill="currentColor" fill-opacity=".14"/>
-          <path d="M17.5 19a6.5 6.5 0 1 1 13 0v1a6.5 6.5 0 0 1-13 0v-1Z" stroke="currentColor" stroke-width="2.5"/>
-          <path d="M12.5 35c1.7-5.2 5.5-7.8 11.5-7.8 3 0 5.4.7 7.3 2.2M30.5 33l3.4 3.4 6.3-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </span>
-      <span>Attendly</span>
+      <div class="login-brand login-brand-light">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none">
+            <rect x="3" y="3" width="42" height="42" rx="15" fill="currentColor" fill-opacity=".14"/>
+            <path d="M17.5 19a6.5 6.5 0 1 1 13 0v1a6.5 6.5 0 0 1-13 0v-1Z" stroke="currentColor" stroke-width="2.5"/>
+            <path d="M12.5 35c1.7-5.2 5.5-7.8 11.5-7.8 3 0 5.4.7 7.3 2.2M30.5 33l3.4 3.4 6.3-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span>PresentSync Attendly</span>
+      </div>
     </div>
     <div class="login-hero-copy">
-      <span class="login-eyebrow"><span class="status-dot"></span> SMARTER ATTENDANCE</span>
-      <h1>A brighter way<br>to show up.</h1>
-      <p>One simple place to manage your classes, recognize students, and keep every day on track.</p>
+      <span class="login-eyebrow"><span class="status-dot"></span> SMART ATTENDANCE ECOSYSTEM</span>
+      <h1>Biometric speed.<br>Total accountability.</h1>
+      <p>Seamless facial recognition attendance, instant post-lecture notifications, and automated class analytics.</p>
       <div class="login-feature">
         <span class="feature-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M4 7.5V5a1 1 0 0 1 1-1h2.5M17 4h2a1 1 0 0 1 1 1v2M20 16v3a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2.5M8.5 10a3.5 3.5 0 1 1 7 0v.5a3.5 3.5 0 0 1-7 0V10ZM7.5 17c.7-1.8 2.2-2.7 4.5-2.7 1.1 0 2 .2 2.7.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
           </svg>
         </span>
-        <span><strong>Thoughtful by design</strong><small>Less paperwork. More time to teach.</small></span>
+        <span><strong>Role-Segregated Access</strong><small>Students review logs &amp; timetable &middot; Admins govern sessions &amp; enrollments.</small></span>
       </div>
     </div>
-    <div class="illustration-caption">A little more present, every day.</div>
+    <div class="illustration-caption">Accurate, frictionless, verified.</div>
   </section>
 
   <section class="login-form-panel" aria-labelledby="loginTitle">
@@ -48,45 +130,116 @@
             <path d="M12.5 35c1.7-5.2 5.5-7.8 11.5-7.8 3 0 5.4.7 7.3 2.2M30.5 33l3.4 3.4 6.3-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </span>
-        <span>Attendly</span>
+        <span>PresentSync Attendly</span>
       </div>
 
       <div class="login-heading">
-        <span class="login-heading-kicker">ADMIN PORTAL</span>
+        <span class="login-heading-kicker">SECURE AUTHENTICATION</span>
         <h2 id="loginTitle">Welcome back<span>.</span></h2>
-        <p>Sign in to continue to your attendance dashboard.</p>
+        <p>Please select your portal to continue with 2-factor email verification.</p>
       </div>
 
-      {% if error %}<div class="alert alert-danger login-error" role="alert">{{ error }}</div>{% endif %}
-
-      <form method="post" class="login-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="mb-3">
-          <label class="form-label" for="username">Username</label>
-          <input class="form-control" id="username" name="username" autocomplete="username" placeholder="Enter your username" required>
-        </div>
-        <div class="mb-4">
-          <label class="form-label" for="password">Password</label>
-          <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required>
-        </div>
-        <button class="btn btn-primary login-submit w-100" type="submit">
-          <span>Sign in to dashboard</span>
-          <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
-            <path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- Segmented Toggle -->
+      <div class="portal-tabs" role="tablist">
+        <button type="button" class="portal-tab-btn {% if active_tab != 'admin' %}active{% endif %}" id="tabBtnStudent" onclick="switchPortal('student')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+            <path d="M6 12v5c3 3 9 3 12 0v-5"/>
           </svg>
+          Student Login
         </button>
-      </form>
+        <button type="button" class="portal-tab-btn {% if active_tab == 'admin' %}active{% endif %}" id="tabBtnAdmin" onclick="switchPortal('admin')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+          Admin Login
+        </button>
+      </div>
+
+      {% if error %}
+        <div class="alert alert-danger login-error" role="alert">{{ error }}</div>
+      {% endif %}
+
+      <!-- STUDENT PORTAL PANEL -->
+      <div id="panelStudent" class="portal-panel {% if active_tab != 'admin' %}active{% endif %}">
+        <div class="role-badge student">
+          <span class="status-dot"></span> Student Portal
+        </div>
+        <form method="post" action="{{ url_for('login') }}" class="login-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="login_type" value="student">
+          <div class="mb-3">
+            <label class="form-label" for="student_identifier">Student Roll Number / Email</label>
+            <input class="form-control" id="student_identifier" name="username" autocomplete="username" placeholder="e.g. IT101 or student@college.edu" required>
+          </div>
+          <div class="mb-4">
+            <label class="form-label" for="student_password">Password</label>
+            <input class="form-control" id="student_password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required>
+          </div>
+          <button class="btn btn-primary login-submit w-100" type="submit">
+            <span>Continue with OTP Verification</span>
+            <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
+              <path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </form>
+
+        <div class="notice-card student-notice">
+          <strong>ℹ️ Enrollment Policy:</strong> Student records and facial biometric enrollment are managed exclusively by designated administrators. Public self-registration is closed for campus security.
+        </div>
+      </div>
+
+      <!-- ADMIN PORTAL PANEL -->
+      <div id="panelAdmin" class="portal-panel {% if active_tab == 'admin' %}active{% endif %}">
+        <div class="role-badge admin">
+          <span class="status-dot" style="background:#bf4800;"></span> Administrator Portal
+        </div>
+        <form method="post" action="{{ url_for('login') }}" class="login-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="login_type" value="admin">
+          <div class="mb-3">
+            <label class="form-label" for="username">Admin Username / Email</label>
+            <input class="form-control" id="username" name="username" autocomplete="username" placeholder="e.g. admin or faculty@college.edu" required>
+          </div>
+          <div class="mb-4">
+            <label class="form-label" for="password">Password</label>
+            <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter administrator password" required>
+          </div>
+          <button class="btn btn-primary login-submit w-100" type="submit">
+            <span>Continue with OTP Verification</span>
+            <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
+              <path d="M4 10h12m-5-5 5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </form>
+
+        <div class="notice-card admin-notice">
+          <strong>🔒 Security Verification:</strong> An OTP verification code will be dispatched to your registered administrator email before dashboard access is granted.
+        </div>
+      </div>
 
       <div class="login-security">
         <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
           <path d="M10 2.5 4 5v4.7c0 3.7 2.5 6.4 6 7.8 3.5-1.4 6-4.1 6-7.8V5l-6-2.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
           <path d="m7.5 9.8 1.7 1.7 3.4-3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <span>Secure administrator access</span>
+        <span>End-to-end Encrypted &middot; 2-Factor Email OTP Protected</span>
       </div>
     </div>
-    <footer class="login-footer">Digital Facial Recognition Attendance System</footer>
+    <footer class="login-footer">PresentSync Digital Facial Recognition Attendance System</footer>
   </section>
 </main>
+
+<script>
+  function switchPortal(portal) {
+    const isStudent = portal === 'student';
+    document.getElementById('tabBtnStudent').classList.toggle('active', isStudent);
+    document.getElementById('tabBtnAdmin').classList.toggle('active', !isStudent);
+    document.getElementById('panelStudent').classList.toggle('active', isStudent);
+    document.getElementById('panelAdmin').classList.toggle('active', !isStudent);
+    const field = isStudent ? document.getElementById('student_identifier') : document.getElementById('username');
+    if (field) field.focus();
+  }
+</script>
 </body>
 </html>

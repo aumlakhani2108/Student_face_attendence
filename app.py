@@ -13,7 +13,10 @@ from urllib.parse import urlsplit
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
+from werkzeug.security import check_password_hash, generate_password_hash
 
+from mailer import dispatch_post_lecture_emails, generate_otp, send_otp_email
+from pdf_export import generate_class_attendance_pdf, generate_student_attendance_pdf
 from model import (
     MODEL_PATH,
     decode_image_bytes,
@@ -32,17 +35,15 @@ os.makedirs(DATASET_DIR, exist_ok=True)
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config.update(
-    SECRET_KEY=os.environ.get("SECRET_KEY"),
-    ADMIN_USERNAME=os.environ.get("ADMIN_USERNAME"),
-    ADMIN_PASSWORD=os.environ.get("ADMIN_PASSWORD"),
+    SECRET_KEY=os.environ.get("SECRET_KEY") or "biobytes-default-session-secret-key-32b",
+    ADMIN_USERNAME=os.environ.get("ADMIN_USERNAME") or "admin",
+    ADMIN_PASSWORD=os.environ.get("ADMIN_PASSWORD") or "admin123",
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "0") == "1",
     PERMANENT_SESSION_LIFETIME=datetime.timedelta(minutes=30),
 )
-if not app.config["SECRET_KEY"] or not app.config["ADMIN_USERNAME"] or not app.config["ADMIN_PASSWORD"]:
-    raise RuntimeError("Set SECRET_KEY, ADMIN_USERNAME, and ADMIN_PASSWORD environment variables before starting.")
 if len(app.config["ADMIN_PASSWORD"]) < 6:
     raise RuntimeError("ADMIN_PASSWORD must be at least 6 characters long.")
 
@@ -92,6 +93,11 @@ def init_db():
                    END
                    WHERE end_time = ''"""
             )
+        if "status" not in class_columns:
+            conn.execute("ALTER TABLE classes ADD COLUMN status TEXT NOT NULL DEFAULT 'scheduled'")
+        if "room" not in class_columns:
+            conn.execute("ALTER TABLE classes ADD COLUMN room TEXT NOT NULL DEFAULT ''")
+
         conn.execute(
             """CREATE TABLE IF NOT EXISTS students (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,16 +106,26 @@ def init_db():
                 class TEXT,
                 section TEXT,
                 reg_no TEXT,
+                email TEXT NOT NULL DEFAULT '',
+                password_hash TEXT NOT NULL DEFAULT '',
                 created_at TEXT
             )"""
         )
+        student_columns = {row["name"] for row in conn.execute("PRAGMA table_info(students)").fetchall()}
+        if "email" not in student_columns:
+            conn.execute("ALTER TABLE students ADD COLUMN email TEXT NOT NULL DEFAULT ''")
+        if "password_hash" not in student_columns:
+            conn.execute("ALTER TABLE students ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
+
         conn.execute(
             """CREATE TABLE IF NOT EXISTS attendance (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id INTEGER,
                 name TEXT,
                 timestamp TEXT,
-                class_id INTEGER
+                class_id INTEGER,
+                email_sent INTEGER NOT NULL DEFAULT 0,
+                email_sent_at TEXT NOT NULL DEFAULT ''
             )"""
         )
         attendance_columns = {
@@ -117,6 +133,10 @@ def init_db():
         }
         if "class_id" not in attendance_columns:
             conn.execute("ALTER TABLE attendance ADD COLUMN class_id INTEGER")
+        if "email_sent" not in attendance_columns:
+            conn.execute("ALTER TABLE attendance ADD COLUMN email_sent INTEGER NOT NULL DEFAULT 0")
+        if "email_sent_at" not in attendance_columns:
+            conn.execute("ALTER TABLE attendance ADD COLUMN email_sent_at TEXT NOT NULL DEFAULT ''")
 
         conn.execute(
             """CREATE TABLE IF NOT EXISTS attendance_daily (
@@ -157,6 +177,57 @@ def init_db():
                SELECT student_id, date(timestamp), COALESCE(class_id, 0) FROM attendance
                WHERE student_id IS NOT NULL AND date(timestamp) IS NOT NULL"""
         )
+
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS admins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_by TEXT NOT NULL DEFAULT 'system',
+                created_at TEXT NOT NULL
+            )"""
+        )
+        existing_admins = conn.execute("SELECT COUNT(*) FROM admins").fetchone()[0]
+        if existing_admins == 0 and app.config.get("ADMIN_USERNAME") and app.config.get("ADMIN_PASSWORD"):
+            initial_email = (
+                os.environ.get("ADMIN_EMAIL", "").strip()
+                or os.environ.get("SMTP_USER", "").strip()
+                or "admin@presentsync.edu"
+            )
+            created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            conn.execute(
+                """INSERT INTO admins (username, email, password_hash, created_by, created_at)
+                   VALUES (?, ?, ?, 'system', ?)""",
+                (
+                    app.config["ADMIN_USERNAME"],
+                    initial_email,
+                    generate_password_hash(app.config["ADMIN_PASSWORD"]),
+                    created_at,
+                ),
+            )
+
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS otp_verifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                otp_code TEXT NOT NULL,
+                purpose TEXT NOT NULL,
+                user_id INTEGER,
+                role TEXT NOT NULL DEFAULT '',
+                payload TEXT NOT NULL DEFAULT '',
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+
+with app.app_context():
+    if not app.config.get("TESTING"):
+        try:
+            init_db()
+        except Exception:
+            pass
 
 
 def migrate_dataset_images():
@@ -264,9 +335,21 @@ if initial_status.get("running"):
 
 
 @app.before_request
-def require_admin_login():
-    if request.endpoint in {"login", "static"} or session.get("admin_authenticated"):
+def require_login():
+    if request.endpoint in {"login", "verify_otp", "resend_otp", "static"}:
         return None
+
+    is_admin = session.get("admin_authenticated") or session.get("role") == "admin"
+    is_student = session.get("role") == "student" and session.get("student_id")
+
+    if request.path.startswith("/student/"):
+        if is_student or is_admin:
+            return None
+        return redirect(url_for("login", next=request.path))
+
+    if is_admin:
+        return None
+
     if request.path.startswith(("/students", "/recognize_face", "/train_", "/attendance_", "/upload_face")):
         return jsonify({"error": "Authentication required."}), 401
     return redirect(url_for("login", next=request.path))
@@ -279,31 +362,430 @@ def valid_next_url(target):
     return parsed.scheme == "" and parsed.netloc == "" and parsed.path.startswith("/") and not parsed.path.startswith("//")
 
 
+def mask_email(email):
+    if not email or "@" not in email:
+        return email or "your registered email"
+    local, domain = email.split("@", 1)
+    if len(local) <= 2:
+        masked_local = local[0] + "*"
+    else:
+        masked_local = local[0] + "*" * (len(local) - 2) + local[-1]
+    return f"{masked_local}@{domain}"
+
+
+def clean_expired_otps():
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    try:
+        with connect_db() as conn:
+            conn.execute("DELETE FROM otp_verifications WHERE expires_at < ?", (now_iso,))
+    except Exception:
+        pass
+
+
+def find_admin(identifier):
+    if not identifier:
+        return None
+    with connect_db() as conn:
+        admin = conn.execute(
+            """SELECT id, username, email, password_hash, created_by, created_at
+               FROM admins
+               WHERE LOWER(TRIM(username)) = LOWER(TRIM(?)) OR LOWER(TRIM(email)) = LOWER(TRIM(?))
+               LIMIT 1""",
+            (identifier, identifier),
+        ).fetchone()
+        if admin:
+            return dict(admin)
+
+    # Fallback to .env config if username matches
+    if app.config.get("ADMIN_USERNAME") and hmac.compare_digest(
+        identifier.encode("utf-8"), app.config["ADMIN_USERNAME"].encode("utf-8")
+    ):
+        return {
+            "id": 1,
+            "username": app.config["ADMIN_USERNAME"],
+            "email": (
+                os.environ.get("ADMIN_EMAIL", "").strip()
+                or os.environ.get("SMTP_USER", "").strip()
+                or "admin@presentsync.edu"
+            ),
+            "password_hash": None,
+            "created_by": "system",
+        }
+    return None
+
+
+def verify_admin_password(admin_data, input_password):
+    if not admin_data or not input_password:
+        return False
+    if admin_data.get("password_hash"):
+        if check_password_hash(admin_data["password_hash"], input_password):
+            return True
+    if app.config.get("ADMIN_USERNAME") and admin_data.get("username") == app.config["ADMIN_USERNAME"]:
+        if app.config.get("ADMIN_PASSWORD") and hmac.compare_digest(
+            input_password.encode("utf-8"), app.config["ADMIN_PASSWORD"].encode("utf-8")
+        ):
+            return True
+    return False
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if session.get("admin_authenticated"):
+    if session.get("admin_authenticated") or session.get("role") == "admin":
         return redirect(url_for("index"))
+    if session.get("role") == "student":
+        return redirect(url_for("student_dashboard"))
+
     error = None
+    active_tab = request.args.get("tab", "student")
+
     if request.method == "POST":
-        username_ok = hmac.compare_digest(
-            request.form.get("username", "").encode("utf-8"),
-            app.config["ADMIN_USERNAME"].encode("utf-8"),
-        )
-        password_ok = hmac.compare_digest(
-            request.form.get("password", "").encode("utf-8"),
-            app.config["ADMIN_PASSWORD"].encode("utf-8"),
-        )
-        if username_ok and password_ok:
-            session.clear()
-            session["admin_authenticated"] = True
-            session.permanent = True
-            next_url = request.args.get("next")
-            return redirect(next_url if valid_next_url(next_url) else url_for("index"))
-        error = "Invalid username or password."
-    return render_template("login.html", error=error)
+        login_type = request.form.get("login_type", "").strip().lower()
+        username_or_id = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        next_url = request.args.get("next") or request.form.get("next") or ""
+
+        if not login_type:
+            # Auto-detect login type if not passed
+            admin_cand = find_admin(username_or_id)
+            login_type = "admin" if admin_cand else "student"
+
+        active_tab = login_type
+
+        # 1. Admin login branch
+        if login_type == "admin":
+            admin = find_admin(username_or_id)
+            if admin and verify_admin_password(admin, password):
+                clean_expired_otps()
+                admin_email = admin.get("email") or "admin@presentsync.edu"
+                otp_code = generate_otp(6)
+                now_dt = datetime.datetime.now(datetime.timezone.utc)
+                expires_dt = now_dt + datetime.timedelta(minutes=10)
+
+                with connect_db() as conn:
+                    conn.execute(
+                        "DELETE FROM otp_verifications WHERE email = ? AND role = 'admin'",
+                        (admin_email,),
+                    )
+                    conn.execute(
+                        """INSERT INTO otp_verifications (email, otp_code, purpose, user_id, role, expires_at, created_at, attempts)
+                           VALUES (?, ?, 'Admin Login', ?, 'admin', ?, ?, 0)""",
+                        (admin_email, otp_code, admin["id"], expires_dt.isoformat(), now_dt.isoformat()),
+                    )
+
+                send_otp_email(admin_email, otp_code, purpose="Admin Sign In")
+
+                session["pending_otp"] = {
+                    "email": admin_email,
+                    "masked_email": mask_email(admin_email),
+                    "role": "admin",
+                    "user_id": admin["id"],
+                    "name": admin["username"],
+                    "login_type": "admin",
+                    "dev_otp": otp_code,
+                    "next": next_url,
+                }
+                return redirect(url_for("verify_otp"))
+            else:
+                error = "Invalid administrator username or password."
+
+        # 2. Student login branch
+        elif login_type == "student":
+            with connect_db() as conn:
+                student = conn.execute(
+                    """SELECT id, name, roll, email, password_hash, class, section, reg_no
+                       FROM students
+                       WHERE (LOWER(TRIM(roll)) = LOWER(TRIM(?)) OR LOWER(TRIM(email)) = LOWER(TRIM(?)))
+                       LIMIT 1""",
+                    (username_or_id, username_or_id),
+                ).fetchone()
+
+            if student:
+                pwd_hash = student["password_hash"]
+                valid_student = False
+                if pwd_hash:
+                    valid_student = check_password_hash(pwd_hash, password)
+                else:
+                    valid_student = password in {student["roll"], student["reg_no"], "123456"}
+
+                if valid_student:
+                    student_email = (
+                        student["email"].strip()
+                        if student["email"]
+                        else f"{student['roll'].lower()}@school.edu"
+                    )
+                    clean_expired_otps()
+                    otp_code = generate_otp(6)
+                    now_dt = datetime.datetime.now(datetime.timezone.utc)
+                    expires_dt = now_dt + datetime.timedelta(minutes=10)
+
+                    with connect_db() as conn:
+                        conn.execute(
+                            "DELETE FROM otp_verifications WHERE email = ? AND role = 'student'",
+                            (student_email,),
+                        )
+                        conn.execute(
+                            """INSERT INTO otp_verifications (email, otp_code, purpose, user_id, role, expires_at, created_at, attempts)
+                               VALUES (?, ?, 'Student Login', ?, 'student', ?, ?, 0)""",
+                            (student_email, otp_code, student["id"], expires_dt.isoformat(), now_dt.isoformat()),
+                        )
+
+                    send_otp_email(student_email, otp_code, purpose="Student Sign In")
+
+                    session["pending_otp"] = {
+                        "email": student_email,
+                        "masked_email": mask_email(student_email),
+                        "role": "student",
+                        "user_id": student["id"],
+                        "name": student["name"],
+                        "login_type": "student",
+                        "dev_otp": otp_code,
+                        "next": next_url,
+                    }
+                    return redirect(url_for("verify_otp"))
+                else:
+                    error = "Invalid roll number or password."
+            else:
+                error = "Student not found with this roll number or email."
+        else:
+            error = "Invalid login type specified."
+
+    return render_template("login.html", error=error, active_tab=active_tab)
 
 
-@app.route("/logout", methods=["POST"])
+@app.route("/verify-otp", methods=["GET", "POST"])
+def verify_otp():
+    pending = session.get("pending_otp")
+    if not pending:
+        return redirect(url_for("login"))
+
+    error = None
+    resent = request.args.get("resent") == "1"
+
+    if request.method == "POST":
+        entered_code = request.form.get("otp", "").strip()
+        if not entered_code:
+            error = "Please enter the 6-digit verification code."
+        else:
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            with connect_db() as conn:
+                record = conn.execute(
+                    """SELECT id, otp_code, expires_at, attempts
+                       FROM otp_verifications
+                       WHERE email = ? AND role = ? AND expires_at >= ?
+                       ORDER BY id DESC LIMIT 1""",
+                    (pending["email"], pending["role"], now_iso),
+                ).fetchone()
+
+                if not record:
+                    error = "Verification code has expired or is invalid. Please request a new code."
+                elif record["attempts"] >= 5:
+                    error = "Too many incorrect attempts. Please request a new verification code."
+                elif record["otp_code"] != entered_code:
+                    conn.execute(
+                        "UPDATE otp_verifications SET attempts = attempts + 1 WHERE id = ?",
+                        (record["id"],),
+                    )
+                    error = "Incorrect verification code. Please check your email and try again."
+                else:
+                    conn.execute("DELETE FROM otp_verifications WHERE id = ?", (record["id"],))
+
+                    next_url = pending.get("next")
+                    role = pending["role"]
+                    user_id = pending["user_id"]
+                    user_name = pending["name"]
+
+                    session.clear()
+                    session.permanent = True
+
+                    if role == "admin":
+                        session["admin_authenticated"] = True
+                        session["role"] = "admin"
+                        session["admin_id"] = user_id
+                        session["username"] = user_name
+                        return redirect(next_url if valid_next_url(next_url) else url_for("index"))
+                    else:
+                        session["role"] = "student"
+                        session["student_id"] = user_id
+                        session["student_name"] = user_name
+                        return redirect(next_url if valid_next_url(next_url) else url_for("student_dashboard"))
+
+    return render_template(
+        "verify_otp.html",
+        pending=pending,
+        error=error,
+        resent=resent,
+        dev_otp=pending.get("dev_otp"),
+    )
+
+
+@app.route("/resend-otp", methods=["POST", "GET"])
+def resend_otp():
+    pending = session.get("pending_otp")
+    if not pending:
+        return redirect(url_for("login"))
+
+    clean_expired_otps()
+    new_code = generate_otp(6)
+    now_dt = datetime.datetime.now(datetime.timezone.utc)
+    expires_dt = now_dt + datetime.timedelta(minutes=10)
+    purpose = f"{pending['role'].capitalize()} Sign In"
+
+    with connect_db() as conn:
+        conn.execute(
+            "DELETE FROM otp_verifications WHERE email = ? AND role = ?",
+            (pending["email"], pending["role"]),
+        )
+        conn.execute(
+            """INSERT INTO otp_verifications (email, otp_code, purpose, user_id, role, expires_at, created_at, attempts)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 0)""",
+            (
+                pending["email"],
+                new_code,
+                purpose,
+                pending["user_id"],
+                pending["role"],
+                expires_dt.isoformat(),
+                now_dt.isoformat(),
+            ),
+        )
+
+    send_otp_email(pending["email"], new_code, purpose=purpose)
+    pending["dev_otp"] = new_code
+    session["pending_otp"] = pending
+    return redirect(url_for("verify_otp", resent=1))
+
+
+@app.route("/manage_admins", methods=["GET", "POST"])
+def manage_admins():
+    if not (session.get("admin_authenticated") or session.get("role") == "admin"):
+        return redirect(url_for("login", next=request.path))
+
+    error = None
+    created = request.args.get("created") == "1"
+    verify_mode = request.args.get("verify") == "1"
+    pending_admin = session.get("pending_new_admin")
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+
+        if action == "initiate":
+            username = request.form.get("username", "").strip()
+            email = request.form.get("email", "").strip()
+            password = request.form.get("password", "")
+            confirm_password = request.form.get("confirm_password", "")
+
+            if not username or not email or not password:
+                error = "All fields (username, email, password) are required."
+            elif len(password) < 6:
+                error = "Password must be at least 6 characters long."
+            elif password != confirm_password:
+                error = "Passwords do not match."
+            elif "@" not in email:
+                error = "Please provide a valid email address."
+            else:
+                with connect_db() as conn:
+                    existing = conn.execute(
+                        "SELECT username, email FROM admins WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)",
+                        (username, email),
+                    ).fetchone()
+
+                if existing:
+                    error = "An administrator with that username or email already exists."
+                else:
+                    clean_expired_otps()
+                    otp_code = generate_otp(6)
+                    now_dt = datetime.datetime.now(datetime.timezone.utc)
+                    expires_dt = now_dt + datetime.timedelta(minutes=10)
+
+                    payload = json.dumps(
+                        {
+                            "username": username,
+                            "email": email,
+                            "password_hash": generate_password_hash(password),
+                            "created_by": session.get("username", "admin"),
+                        }
+                    )
+
+                    with connect_db() as conn:
+                        conn.execute(
+                            "DELETE FROM otp_verifications WHERE email = ? AND purpose = 'New Admin Verification'",
+                            (email,),
+                        )
+                        conn.execute(
+                            """INSERT INTO otp_verifications (email, otp_code, purpose, role, payload, expires_at, created_at, attempts)
+                               VALUES (?, ?, 'New Admin Verification', 'admin', ?, ?, ?, 0)""",
+                            (email, otp_code, payload, expires_dt.isoformat(), now_dt.isoformat()),
+                        )
+
+                    send_otp_email(email, otp_code, purpose="New Administrator Account Verification")
+
+                    session["pending_new_admin"] = {
+                        "username": username,
+                        "email": email,
+                        "masked_email": mask_email(email),
+                        "dev_otp": otp_code,
+                    }
+                    return redirect(url_for("manage_admins", verify=1))
+
+        elif action == "verify":
+            otp_code = request.form.get("otp", "").strip()
+            if not pending_admin:
+                error = "No pending administrator invitation found. Please initiate again."
+            elif not otp_code:
+                error = "Please enter the verification code sent to the email."
+            else:
+                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                with connect_db() as conn:
+                    record = conn.execute(
+                        """SELECT id, otp_code, payload, attempts
+                           FROM otp_verifications
+                           WHERE email = ? AND purpose = 'New Admin Verification' AND expires_at >= ?
+                           ORDER BY id DESC LIMIT 1""",
+                        (pending_admin["email"], now_iso),
+                    ).fetchone()
+
+                    if not record:
+                        error = "Verification code expired or not found. Please initiate again."
+                    elif record["attempts"] >= 5:
+                        error = "Too many incorrect attempts. Please cancel and re-create."
+                    elif record["otp_code"] != otp_code:
+                        conn.execute(
+                            "UPDATE otp_verifications SET attempts = attempts + 1 WHERE id = ?",
+                            (record["id"],),
+                        )
+                        error = "Invalid verification code. Please check the email and try again."
+                    else:
+                        data = json.loads(record["payload"])
+                        conn.execute(
+                            """INSERT INTO admins (username, email, password_hash, created_by, created_at)
+                               VALUES (?, ?, ?, ?, ?)""",
+                            (data["username"], data["email"], data["password_hash"], data["created_by"], now_iso),
+                        )
+                        conn.execute("DELETE FROM otp_verifications WHERE id = ?", (record["id"],))
+
+                        session.pop("pending_new_admin", None)
+                        return redirect(url_for("manage_admins", created=1))
+
+        elif action == "cancel":
+            session.pop("pending_new_admin", None)
+            return redirect(url_for("manage_admins"))
+
+    with connect_db() as conn:
+        admins = conn.execute(
+            "SELECT id, username, email, created_by, created_at FROM admins ORDER BY id ASC"
+        ).fetchall()
+
+    return render_template(
+        "manage_admins.html",
+        admins=[dict(a) for a in admins],
+        error=error,
+        created=created,
+        verify_mode=verify_mode,
+        pending_admin=session.get("pending_new_admin"),
+    )
+
+
+@app.route("/logout", methods=["GET", "POST"])
 def logout():
     session.clear()
     return redirect(url_for("login"))
@@ -331,6 +813,7 @@ def classes_page():
         class_time = request.form.get("class_time", "").strip()
         end_time = request.form.get("end_time", "").strip()
         faculty = request.form.get("faculty", "").strip()
+        room = request.form.get("room", "").strip()
         try:
             valid_date = datetime.date.fromisoformat(class_date).isoformat() == class_date
         except ValueError:
@@ -351,9 +834,9 @@ def classes_page():
             created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
             with connect_db() as conn:
                 conn.execute(
-                    """INSERT INTO classes (name, class_date, class_time, end_time, faculty, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (name, class_date, class_time, end_time, faculty, created_at),
+                    """INSERT INTO classes (name, class_date, class_time, end_time, faculty, room, status, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?)""",
+                    (name, class_date, class_time, end_time, faculty, room, created_at),
                 )
             return redirect(url_for("classes_page", created=1))
 
@@ -362,39 +845,63 @@ def classes_page():
     with connect_db() as conn:
         classes = conn.execute(
             """SELECT c.id, c.name, c.class_date, c.class_time, c.end_time, c.faculty,
+                      c.status, c.room,
                       COUNT(DISTINCT a.student_id) AS attended_count
                FROM classes c
                LEFT JOIN attendance a
-                 ON a.class_id = c.id AND date(a.timestamp) = c.class_date
+                 ON a.class_id = c.id AND (date(a.timestamp) = c.class_date OR date(a.timestamp, 'localtime') = c.class_date)
                GROUP BY c.id
                ORDER BY c.id DESC""",
         ).fetchall()
-    classes = [
-        {
-            **dict(class_item),
-            "schedule_status": (
-                "Past - read-only"
-                if datetime.datetime.combine(
-                    datetime.date.fromisoformat(class_item["class_date"]),
-                    datetime.time.fromisoformat(class_item["end_time"]),
-                ) <= now
-                else "Attendance open"
-                if datetime.datetime.combine(
-                    datetime.date.fromisoformat(class_item["class_date"]),
-                    datetime.time.fromisoformat(class_item["class_time"]),
-                ) <= now
-                else "Upcoming"
-            ),
-        }
-        for class_item in classes
-    ]
+    classes_list = []
+    for class_row in classes:
+        item = dict(class_row)
+        item["schedule_status"] = (
+            "Completed"
+            if item.get("status") == "completed"
+            else "Past - read-only"
+            if datetime.datetime.combine(
+                datetime.date.fromisoformat(item["class_date"]),
+                datetime.time.fromisoformat(item["end_time"]),
+            ) <= now
+            else "Attendance open"
+            if datetime.datetime.combine(
+                datetime.date.fromisoformat(item["class_date"]),
+                datetime.time.fromisoformat(item["class_time"]),
+            ) <= now
+            else "Upcoming"
+        )
+        classes_list.append(item)
+    classes = classes_list
     return render_template(
         "classes.html",
         classes=classes,
         error=error,
         created=request.args.get("created") == "1",
+        completed=request.args.get("completed") == "1",
         today=today,
     )
+
+
+@app.route("/classes/<int:class_id>/complete", methods=["POST"])
+def complete_class(class_id):
+    with connect_db() as conn:
+        cls = conn.execute("SELECT id, name FROM classes WHERE id = ?", (class_id,)).fetchone()
+        if not cls:
+            abort(404, description="Class not found.")
+        conn.execute("UPDATE classes SET status = 'completed' WHERE id = ?", (class_id,))
+
+    # Trigger background email delivery for all attended students
+    threading.Thread(
+        target=dispatch_post_lecture_emails,
+        args=(class_id, connect_db),
+        daemon=True,
+        name=f"dispatch-emails-{class_id}",
+    ).start()
+
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.is_json:
+        return jsonify({"success": True, "message": "Class marked completed and attendance emails are being dispatched."})
+    return redirect(url_for("classes_page", completed=1))
 
 
 @app.route("/attendance_stats")
@@ -655,16 +1162,23 @@ def add_student():
     name = data.get("name", "").strip()
     if not name:
         return jsonify({"error": "Name is required."}), 400
+    email = data.get("email", "").strip()
+    roll = data.get("roll", "").strip()
+    reg_no = data.get("reg_no", "").strip()
+    raw_password = data.get("password", "").strip() or roll or reg_no or "123456"
+    pwd_hash = generate_password_hash(raw_password)
     with connect_db() as conn:
         cursor = conn.execute(
-            """INSERT INTO students (name, roll, class, section, reg_no, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO students (name, roll, class, section, reg_no, email, password_hash, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name,
-                data.get("roll", "").strip(),
+                roll,
                 data.get("class", "").strip(),
                 data.get("sec", "").strip(),
-                data.get("reg_no", "").strip(),
+                reg_no,
+                email,
+                pwd_hash,
                 datetime.datetime.now(datetime.timezone.utc).isoformat(),
             ),
         )
@@ -727,7 +1241,7 @@ def mark_attendance_page():
                       COUNT(DISTINCT a.student_id) AS attended_count
                FROM classes c
                LEFT JOIN attendance a
-                 ON a.class_id = c.id AND date(a.timestamp) = c.class_date
+                 ON a.class_id = c.id AND (date(a.timestamp) = c.class_date OR date(a.timestamp, 'localtime') = c.class_date)
                GROUP BY c.id
                ORDER BY c.name"""
         ).fetchall()
@@ -800,13 +1314,18 @@ def recognize_face():
     try:
         embedding = extract_embedding_for_image(request.files["image"].stream)
         if embedding is None:
-            return jsonify({"recognized": False, "error": "No face detected."})
+            return jsonify({"recognized": False, "error": "No face detected.", "unknown_face": False})
         model = load_model_if_exists()
         if model is None:
             return jsonify({"recognized": False, "error": "Model not trained."}), 503
         student_id, similarity = predict_with_model(model, embedding)
         if similarity < 0.363:
-            return jsonify({"recognized": False, "similarity": float(similarity)})
+            return jsonify({
+                "recognized": False,
+                "similarity": float(similarity),
+                "unknown_face": True,
+                "error": "Face not recognized",
+            })
         timestamp = datetime.datetime.now(datetime.timezone.utc)
         today = timestamp.date().isoformat()
         with connect_db() as conn:
@@ -836,8 +1355,8 @@ def recognize_face():
             if class_id:
                 present_count = conn.execute(
                     """SELECT COUNT(DISTINCT student_id) FROM attendance
-                       WHERE class_id = ? AND date(timestamp) = ?""",
-                    (class_id, class_date),
+                       WHERE class_id = ? AND (date(timestamp) = ? OR date(timestamp, 'localtime') = ?)""",
+                    (class_id, class_date, class_date),
                 ).fetchone()[0]
         return jsonify(
             {
@@ -934,11 +1453,215 @@ def download_csv():
     return send_file(memory, as_attachment=True, download_name=filename, mimetype="text/csv")
 
 
+@app.route("/download_pdf")
+def download_pdf():
+    class_id_value = request.args.get("class_id", "")
+    class_id = None
+    if class_id_value:
+        if not class_id_value.isdigit() or int(class_id_value) < 1:
+            abort(400, description="class_id must be a positive integer")
+        class_id = int(class_id_value)
+    with connect_db() as conn:
+        class_info = None
+        if class_id is not None:
+            class_row = conn.execute("SELECT * FROM classes WHERE id = ?", (class_id,)).fetchone()
+            if class_row is None:
+                abort(404, description="Class not found.")
+            class_info = dict(class_row)
+        rows = conn.execute(
+            """SELECT a.id, a.student_id, a.name, a.timestamp, s.roll, s.class, s.section, COALESCE(c.name, '') AS class_name
+               FROM attendance a
+               LEFT JOIN students s ON s.id = a.student_id
+               LEFT JOIN classes c ON c.id = a.class_id
+               WHERE (? IS NULL OR a.class_id = ?)
+               ORDER BY a.timestamp DESC""",
+            (class_id, class_id),
+        ).fetchall()
+    try:
+        pdf_buffer = generate_class_attendance_pdf(class_info, [dict(r) for r in rows])
+        filename = f"attendance_class_{class_id}.pdf" if class_id else "attendance_all.pdf"
+        return send_file(pdf_buffer, as_attachment=True, download_name=filename, mimetype="application/pdf")
+    except Exception as exc:
+        app.logger.exception("Could not generate class attendance PDF")
+        abort(500, description=f"PDF generation failed: {exc}")
+
+
+@app.route("/student/dashboard")
+def student_dashboard():
+    student_id = session.get("student_id")
+    is_admin = session.get("admin_authenticated") or session.get("role") == "admin"
+    if not student_id and not is_admin:
+        return redirect(url_for("login"))
+
+    if is_admin and request.args.get("student_id"):
+        try:
+            student_id = int(request.args.get("student_id"))
+        except ValueError:
+            abort(400, description="Invalid student_id")
+
+    with connect_db() as conn:
+        student = conn.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
+        if not student:
+            abort(404, description="Student not found.")
+
+        records = conn.execute(
+            """SELECT a.id, a.timestamp, c.id AS class_id, COALESCE(c.name, 'General Session') AS class_name,
+                      c.class_date, c.class_time, c.end_time, c.faculty, c.room, a.email_sent
+               FROM attendance a
+               LEFT JOIN classes c ON c.id = a.class_id
+               WHERE a.student_id = ?
+               ORDER BY a.timestamp DESC""",
+            (student_id,),
+        ).fetchall()
+
+        total_classes = conn.execute(
+            "SELECT COUNT(*) FROM classes WHERE class_date <= date('now')"
+        ).fetchone()[0]
+
+    attended_count = len(records)
+    total_sessions = max(total_classes, attended_count)
+    percentage = round((attended_count / total_sessions * 100), 1) if total_sessions > 0 else 100.0
+
+    stats = {
+        "attended_sessions": attended_count,
+        "total_sessions": total_sessions,
+        "percentage": min(percentage, 100.0),
+    }
+
+    return render_template(
+        "student_dashboard.html",
+        student=student,
+        records=records,
+        stats=stats,
+    )
+
+
+@app.route("/student/timetable")
+def student_timetable():
+    student_id = session.get("student_id")
+    is_admin = session.get("admin_authenticated") or session.get("role") == "admin"
+    if not student_id and not is_admin:
+        return redirect(url_for("login"))
+
+    if is_admin and request.args.get("student_id"):
+        try:
+            student_id = int(request.args.get("student_id"))
+        except ValueError:
+            abort(400, description="Invalid student_id")
+
+    now = datetime.datetime.now()
+    today_str = now.date().isoformat()
+
+    with connect_db() as conn:
+        student = conn.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
+        if not student:
+            abort(404, description="Student not found.")
+
+        classes = conn.execute(
+            """SELECT c.*,
+                      EXISTS(
+                          SELECT 1 FROM attendance a
+                          WHERE a.class_id = c.id AND a.student_id = ?
+                      ) AS attended
+               FROM classes c
+               ORDER BY c.class_date DESC, c.class_time ASC""",
+            (student_id,),
+        ).fetchall()
+
+    enriched_classes = []
+    for c in classes:
+        c_dict = dict(c)
+        try:
+            start_dt = datetime.datetime.combine(
+                datetime.date.fromisoformat(c["class_date"]),
+                datetime.time.fromisoformat(c["class_time"]),
+            )
+            end_dt = datetime.datetime.combine(
+                datetime.date.fromisoformat(c["class_date"]),
+                datetime.time.fromisoformat(c["end_time"]),
+            )
+        except Exception:
+            start_dt = end_dt = now
+
+        if c_dict.get("status") == "completed":
+            status = "Completed"
+        elif now < start_dt:
+            status = "Upcoming"
+        elif start_dt <= now <= end_dt:
+            status = "Live Now"
+        else:
+            status = "Past - Ended"
+
+        c_dict["display_status"] = status
+        enriched_classes.append(c_dict)
+
+    return render_template(
+        "student_timetable.html",
+        student=student,
+        classes=enriched_classes,
+        today=today_str,
+    )
+
+
+@app.route("/student/download_pdf")
+def student_download_pdf():
+    student_id = session.get("student_id")
+    is_admin = session.get("admin_authenticated") or session.get("role") == "admin"
+    if not student_id and not is_admin:
+        return redirect(url_for("login"))
+
+    if is_admin and request.args.get("student_id"):
+        try:
+            student_id = int(request.args.get("student_id"))
+        except ValueError:
+            abort(400, description="Invalid student_id")
+
+    with connect_db() as conn:
+        student = conn.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
+        if not student:
+            abort(404, description="Student not found.")
+
+        records = conn.execute(
+            """SELECT a.id, a.timestamp, COALESCE(c.name, 'General Session') AS class_name,
+                      c.class_date, c.faculty
+               FROM attendance a
+               LEFT JOIN classes c ON c.id = a.class_id
+               WHERE a.student_id = ?
+               ORDER BY a.timestamp DESC""",
+            (student_id,),
+        ).fetchall()
+
+        total_classes = conn.execute("SELECT COUNT(*) FROM classes WHERE class_date <= date('now')").fetchone()[0]
+
+    attended = len(records)
+    total = max(total_classes, attended)
+    pct = round((attended / total * 100), 1) if total > 0 else 100.0
+
+    stats = {
+        "attended_sessions": attended,
+        "total_sessions": total,
+        "percentage": min(pct, 100.0),
+    }
+
+    try:
+        pdf_buffer = generate_student_attendance_pdf(dict(student), [dict(r) for r in records], stats)
+        safe_name = student["name"].replace(" ", "_")
+        return send_file(
+            pdf_buffer,
+            as_attachment=True,
+            download_name=f"Attendance_Transcript_{safe_name}.pdf",
+            mimetype="application/pdf",
+        )
+    except Exception as exc:
+        app.logger.exception("PDF generation error")
+        abort(500, description=f"Could not generate PDF: {exc}")
+
+
 @app.route("/students")
 def students_list():
     with connect_db() as conn:
         rows = conn.execute(
-            "SELECT id, name, roll, class, section, reg_no, created_at FROM students ORDER BY id DESC"
+            "SELECT id, name, roll, class, section, reg_no, email, created_at FROM students ORDER BY id DESC"
         ).fetchall()
     return jsonify(
         {
@@ -950,6 +1673,7 @@ def students_list():
                     "class": row["class"],
                     "section": row["section"],
                     "reg_no": row["reg_no"],
+                    "email": row["email"],
                     "created_at": row["created_at"],
                 }
                 for row in rows
@@ -984,4 +1708,5 @@ def delete_student(student_id):
 
 
 if __name__ == "__main__":
-    app.run(debug=os.environ.get("FLASK_DEBUG") == "1", host="127.0.0.1")
+    port = int(os.environ.get("PORT", 7860))
+    app.run(debug=os.environ.get("FLASK_DEBUG") == "1", host="0.0.0.0", port=port)

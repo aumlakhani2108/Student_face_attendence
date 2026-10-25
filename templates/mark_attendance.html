@@ -17,6 +17,7 @@
         <button id="detectMarkCameraBtn" class="btn btn-outline-primary">Detect cameras</button>
         <button id="startMarkBtn" class="btn btn-primary" {% if not has_open_class %}disabled{% endif %}>Start</button>
         <button id="stopMarkBtn" class="btn btn-danger" disabled>Stop</button>
+        <button id="endLectureBtn" class="btn btn-warning" type="button" style="display:none;">End Lecture &amp; Send Emails</button>
         <form method="post" action="{{ url_for('logout') }}" class="d-inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="btn btn-outline-secondary" type="submit">Log out</button>
@@ -53,8 +54,19 @@
         <div id="markStatus" class="mt-2 small text-muted">Waiting...</div>
       </div>
       <div class="col-md-5">
-        <h6>Recognized (session)</h6>
-        <ul id="recognizedList" class="list-group"></ul>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h6 class="mb-0">Recognized Students (Session)</h6>
+          <span id="sessionRecognizedBadge" class="badge bg-success rounded-pill">0</span>
+        </div>
+        <ul id="recognizedList" class="list-group mb-4" style="max-height: 230px; overflow-y: auto;"></ul>
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h6 class="mb-0 text-danger">&#9888; Unknown / Unregistered Faces</h6>
+          <span id="unknownCountBadge" class="badge bg-danger rounded-pill">0</span>
+        </div>
+        <div id="unknownFacesContainer" class="d-flex gap-2 flex-wrap p-2 border rounded bg-light" style="min-height: 90px; max-height: 190px; overflow-y: auto;">
+          <p class="text-muted small my-auto mx-auto" id="noUnknownMsg">No unknown faces detected</p>
+        </div>
       </div>
     </div>
   </div>

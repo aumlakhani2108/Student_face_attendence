@@ -32,10 +32,27 @@ def client(tmp_path, monkeypatch):
 
 
 def login(client):
-    return client.post(
+    res = client.post(
         "/login",
-        data={"username": "test-admin", "password": "test-password-long-enough"},
+        data={"username": "test-admin", "password": "test-password-long-enough", "login_type": "admin"},
     )
+    with client.session_transaction() as sess:
+        pending = sess.get("pending_otp")
+    if pending and "dev_otp" in pending:
+        return client.post("/verify-otp", data={"otp": pending["dev_otp"]})
+    return res
+
+
+def student_login(client, username, password):
+    res = client.post(
+        "/login",
+        data={"username": username, "password": password, "login_type": "student"},
+    )
+    with client.session_transaction() as sess:
+        pending = sess.get("pending_otp")
+    if pending and "dev_otp" in pending:
+        return client.post("/verify-otp", data={"otp": pending["dev_otp"]})
+    return res
 
 
 def active_class_times():
@@ -650,3 +667,362 @@ def test_training_failure_is_reported_and_lock_released(client, monkeypatch):
     assert "No usable faces" in status["message"]
     assert attendance_app.training_lock.acquire(blocking=False)
     attendance_app.training_lock.release()
+
+
+def test_student_registration_with_email_and_password(client):
+    login(client)
+    res = client.post(
+        "/add_student",
+        data={
+            "name": "Jane Doe",
+            "roll": "IT101",
+            "class": "IT",
+            "sec": "A",
+            "reg_no": "REG-101",
+            "email": "jane@example.com",
+            "password": "securepassword123",
+        },
+    )
+    assert res.status_code == 200
+    student_id = res.json["student_id"]
+    with sqlite3.connect(attendance_app.DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM students WHERE id = ?", (student_id,)).fetchone()
+    assert row["name"] == "Jane Doe"
+    assert row["email"] == "jane@example.com"
+    assert attendance_app.check_password_hash(row["password_hash"], "securepassword123")
+
+
+def test_student_login_and_access_control(client):
+    login(client)
+    res = client.post(
+        "/add_student",
+        data={
+            "name": "John Smith",
+            "roll": "IT102",
+            "class": "IT",
+            "sec": "B",
+            "reg_no": "REG-102",
+            "email": "john@example.com",
+            "password": "johnpassword",
+        },
+    )
+    student_id = res.json["student_id"]
+    client.post("/logout")
+
+    # Attempt student login with wrong password
+    bad_login = client.post("/login", data={"username": "IT102", "password": "wrongpassword", "login_type": "student"})
+    assert bad_login.status_code == 200
+    assert b"Invalid roll number or password" in bad_login.data
+
+    # Successful student login with roll number and OTP verification
+    good_login = student_login(client, "IT102", "johnpassword")
+    assert good_login.status_code == 302
+    assert good_login.headers["Location"].endswith("/student/dashboard")
+
+    # Access student dashboard
+    dash = client.get("/student/dashboard")
+    assert dash.status_code == 200
+    assert b"John Smith" in dash.data
+    assert b"IT102" in dash.data
+
+    # Student cannot access admin routes
+    admin_page = client.get("/classes")
+    assert admin_page.status_code == 302
+    assert "/login" in admin_page.headers["Location"]
+
+
+def test_student_timetable(client):
+    login(client)
+    student_res = client.post(
+        "/add_student",
+        data={"name": "Alice Bob", "roll": "IT103", "email": "alice@example.com", "password": "pass"},
+    )
+    student_id = student_res.json["student_id"]
+
+    now = attendance_app.datetime.datetime.now()
+    client.post(
+        "/classes",
+        data={
+            "name": "Cloud Computing",
+            "class_date": now.date().isoformat(),
+            "class_time": "14:00",
+            "end_time": "15:00",
+            "faculty": "Dr. Turing",
+            "room": "Room 303",
+        },
+    )
+    client.post("/logout")
+
+    student_login(client, "IT103", "pass")
+    tt = client.get("/student/timetable")
+    assert tt.status_code == 200
+    assert b"Cloud Computing" in tt.data
+    assert b"Dr. Turing" in tt.data
+    assert b"Room 303" in tt.data
+
+
+def test_class_completion_and_email_dispatch(client, monkeypatch):
+    login(client)
+    res = client.post(
+        "/add_student",
+        data={"name": "Eve Student", "roll": "IT104", "email": "eve@example.com", "password": "pass"},
+    )
+    student_id = res.json["student_id"]
+
+    now = attendance_app.datetime.datetime.now()
+    client.post(
+        "/classes",
+        data={
+            "name": "Data Structures",
+            "class_date": now.date().isoformat(),
+            "class_time": "10:00",
+            "end_time": "11:00",
+            "faculty": "Prof. Knuth",
+            "room": "Hall B",
+        },
+    )
+    with sqlite3.connect(attendance_app.DB_PATH) as conn:
+        class_id = conn.execute("SELECT id FROM classes ORDER BY id DESC LIMIT 1").fetchone()[0]
+        conn.execute(
+            "INSERT INTO attendance (student_id, name, timestamp, class_id) VALUES (?, ?, ?, ?)",
+            (student_id, "Eve Student", now.isoformat(), class_id),
+        )
+
+    sent_emails = []
+    def mock_send(to_email, subj, text, html=None):
+        sent_emails.append({"to": to_email, "subject": subj})
+        return True, "Sent"
+
+    monkeypatch.setattr("mailer.send_email", mock_send)
+
+    from mailer import dispatch_post_lecture_emails
+    result = dispatch_post_lecture_emails(class_id, attendance_app.connect_db)
+    assert result["sent"] == 1
+    assert len(sent_emails) == 1
+    assert sent_emails[0]["to"] == "eve@example.com"
+    assert "Data Structures" in sent_emails[0]["subject"]
+
+    # Verify class complete route updates status
+    comp_res = client.post(f"/classes/{class_id}/complete")
+    assert comp_res.status_code == 302
+    with sqlite3.connect(attendance_app.DB_PATH) as conn:
+        status = conn.execute("SELECT status FROM classes WHERE id = ?", (class_id,)).fetchone()[0]
+    assert status == "completed"
+
+
+def test_pdf_export_routes(client):
+    login(client)
+    now = attendance_app.datetime.datetime.now()
+    client.post(
+        "/classes",
+        data={
+            "name": "Machine Learning",
+            "class_date": now.date().isoformat(),
+            "class_time": "10:00",
+            "end_time": "11:00",
+            "faculty": "Dr. Ng",
+        },
+    )
+    admin_pdf = client.get("/download_pdf")
+    assert admin_pdf.status_code == 200
+    assert admin_pdf.mimetype == "application/pdf"
+    assert admin_pdf.data.startswith(b"%PDF-")
+
+    res = client.post(
+        "/add_student",
+        data={"name": "PDF Student", "roll": "IT105", "email": "pdf@example.com", "password": "pass"},
+    )
+    student_id = res.json["student_id"]
+    client.post("/logout")
+
+    student_login(client, "IT105", "pass")
+    student_pdf = client.get("/student/download_pdf")
+    assert student_pdf.status_code == 200
+    assert student_pdf.mimetype == "application/pdf"
+    assert student_pdf.data.startswith(b"%PDF-")
+
+
+def test_unknown_face_flag_in_recognition(client, monkeypatch):
+    login(client)
+    class_time, end_time = active_class_times()
+    class_date = attendance_app.datetime.datetime.now().date().isoformat()
+    client.post(
+        "/classes",
+        data={
+            "name": "Networks",
+            "class_date": class_date,
+            "class_time": class_time,
+            "end_time": end_time,
+            "faculty": "Prof. Cerf",
+        },
+    )
+    with sqlite3.connect(attendance_app.DB_PATH) as conn:
+        class_id = conn.execute("SELECT id FROM classes ORDER BY id DESC LIMIT 1").fetchone()[0]
+
+    monkeypatch.setattr(attendance_app, "extract_embedding_for_image", lambda stream: [0.1, 0.2])
+    monkeypatch.setattr(attendance_app, "load_model_if_exists", lambda: object())
+    # Low similarity: unknown face
+    monkeypatch.setattr(attendance_app, "predict_with_model", lambda model, embedding: (999, 0.15))
+
+    res = client.post(
+        "/recognize_face",
+        data={
+            "class_id": str(class_id),
+            "image": (io.BytesIO(b"dummy image"), "test.jpg"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert res.status_code == 200
+    assert res.json["recognized"] is False
+    assert res.json["unknown_face"] is True
+
+
+def test_admin_login_with_otp_flow(client):
+    # Bad credentials stay on login page
+    bad = client.post("/login", data={"username": "test-admin", "password": "wrongpassword", "login_type": "admin"})
+    assert bad.status_code == 200
+    assert b"Invalid administrator username or password" in bad.data
+
+    # Valid credentials trigger OTP and redirect to /verify-otp
+    initiate = client.post("/login", data={"username": "test-admin", "password": "test-password-long-enough", "login_type": "admin"})
+    assert initiate.status_code == 302
+    assert "/verify-otp" in initiate.headers["Location"]
+
+    # Verify-otp page renders
+    page = client.get("/verify-otp")
+    assert page.status_code == 200
+    assert b"Two-Factor Verification" in page.data
+    assert b"Resend Code" in page.data
+
+    # Submit wrong OTP code
+    bad_code = client.post("/verify-otp", data={"otp": "000000"})
+    assert bad_code.status_code == 200
+    assert b"Incorrect verification code" in bad_code.data
+
+    # Submit valid OTP code
+    with client.session_transaction() as sess:
+        dev_otp = sess["pending_otp"]["dev_otp"]
+
+    verified = client.post("/verify-otp", data={"otp": dev_otp})
+    assert verified.status_code == 302
+    assert verified.headers["Location"].endswith("/")
+
+    # Admin dashboard is now accessible
+    dash = client.get("/")
+    assert dash.status_code == 200
+
+
+def test_student_login_with_otp_flow(client):
+    login(client)
+    res = client.post(
+        "/add_student",
+        data={"name": "Sita Raman", "roll": "IT201", "email": "sita@example.com", "password": "sitapassword123"},
+    )
+    assert res.status_code == 200
+    client.post("/logout")
+
+    # Step 1: Submit credentials
+    step1 = client.post("/login", data={"username": "IT201", "password": "sitapassword123", "login_type": "student"})
+    assert step1.status_code == 302
+    assert "/verify-otp" in step1.headers["Location"]
+
+    # Step 2: Retrieve OTP and verify
+    with client.session_transaction() as sess:
+        otp = sess["pending_otp"]["dev_otp"]
+
+    step2 = client.post("/verify-otp", data={"otp": otp})
+    assert step2.status_code == 302
+    assert step2.headers["Location"].endswith("/student/dashboard")
+
+    # Access student dashboard
+    sdash = client.get("/student/dashboard")
+    assert sdash.status_code == 200
+    assert b"Sita Raman" in sdash.data
+
+
+def test_admin_creates_another_admin_with_email_otp(client):
+    # Log in as primary admin
+    login(client)
+
+    # 1. View /manage_admins
+    manage_page = client.get("/manage_admins")
+    assert manage_page.status_code == 200
+    assert b"Administrator Management" in manage_page.data
+    assert b"test-admin" in manage_page.data
+
+    # 2. Initiate creation of a new admin
+    initiate = client.post(
+        "/manage_admins",
+        data={
+            "action": "initiate",
+            "username": "prof_sharma",
+            "email": "sharma@college.edu",
+            "password": "sharmapassword123",
+            "confirm_password": "sharmapassword123",
+        },
+    )
+    assert initiate.status_code == 302
+    assert "/manage_admins?verify=1" in initiate.headers["Location"]
+
+    # Verify mode is visible
+    vpage = client.get("/manage_admins?verify=1")
+    assert vpage.status_code == 200
+    assert b"Verify New Administrator" in vpage.data
+    assert b"sharma@college.edu" in vpage.data
+
+    # 3. Submit OTP verification code
+    with client.session_transaction() as sess:
+        new_admin_otp = sess["pending_new_admin"]["dev_otp"]
+
+    verify_res = client.post("/manage_admins", data={"action": "verify", "otp": new_admin_otp})
+    assert verify_res.status_code == 302
+    assert "/manage_admins?created=1" in verify_res.headers["Location"]
+
+    # Confirm new admin is listed
+    updated_page = client.get("/manage_admins?created=1")
+    assert updated_page.status_code == 200
+    assert b"prof_sharma" in updated_page.data
+    assert b"sharma@college.edu" in updated_page.data
+
+    # Log out existing admin
+    client.post("/logout")
+
+    # 4. New admin logs in with credentials and OTP
+    step1 = client.post(
+        "/login",
+        data={"username": "prof_sharma", "password": "sharmapassword123", "login_type": "admin"},
+    )
+    assert step1.status_code == 302
+    assert "/verify-otp" in step1.headers["Location"]
+
+    with client.session_transaction() as sess:
+        sharma_otp = sess["pending_otp"]["dev_otp"]
+
+    step2 = client.post("/verify-otp", data={"otp": sharma_otp})
+    assert step2.status_code == 302
+
+    # New admin has full admin access to dashboard
+    new_admin_dash = client.get("/")
+    assert new_admin_dash.status_code == 200
+
+
+def test_unauthorized_users_cannot_access_manage_admins(client):
+    # Unauthenticated visitor redirected to login
+    unauth = client.get("/manage_admins")
+    assert unauth.status_code == 302
+    assert "/login" in unauth.headers["Location"]
+
+    # Student user cannot access manage_admins
+    login(client)
+    client.post(
+        "/add_student",
+        data={"name": "Bob Student", "roll": "IT202", "email": "bob@example.com", "password": "bobpass"},
+    )
+    client.post("/logout")
+
+    student_login(client, "IT202", "bobpass")
+    student_try = client.get("/manage_admins")
+    assert student_try.status_code == 302
+    assert "/login" in student_try.headers["Location"]
+

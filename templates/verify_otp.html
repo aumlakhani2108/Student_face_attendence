@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3f6ff">
+  <title>Verify Identity · PresentSync</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .verify-box {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: radial-gradient(circle at 50% 10%, #eef5fc 0%, #f5f5f7 70%);
+    }
+    .verify-card {
+      background: #ffffff;
+      max-width: 460px;
+      width: 100%;
+      border-radius: 20px;
+      padding: 36px 32px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.07);
+      border: 1px solid #e5e5ea;
+      text-align: center;
+    }
+    .brand-icon {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 16px;
+      color: #0071e3;
+      background: #e8f3ff;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .otp-input {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: 12px;
+      text-align: center;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 2px solid #d2d2d7;
+      transition: all 0.2s ease;
+      background: #fafafc;
+      color: #1d1d1f;
+      max-width: 280px;
+      margin: 0 auto;
+    }
+    .otp-input:focus {
+      border-color: #0071e3;
+      background: #ffffff;
+      box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.15);
+      outline: none;
+    }
+    .dev-badge {
+      background: #fff8e6;
+      border: 1px solid #ffe8a3;
+      color: #7a5200;
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-top: 24px;
+      text-align: left;
+    }
+  </style>
+</head>
+<body>
+<main class="verify-box">
+  <div class="verify-card">
+    <div class="brand-icon">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        <path d="m9 12 2 2 4-4"/>
+      </svg>
+    </div>
+
+    <h3 class="fw-bold mb-2">Two-Factor Verification</h3>
+    <p class="text-muted small mb-4">
+      We sent a 6-digit verification code to<br>
+      <strong class="text-dark">{{ pending.masked_email }}</strong>
+    </p>
+
+    {% if resent %}
+      <div class="alert alert-info py-2 small mb-3" role="status">
+        A new verification code has been dispatched to your email.
+      </div>
+    {% endif %}
+
+    {% if error %}
+      <div class="alert alert-danger py-2 small mb-3" role="alert">
+        {{ error }}
+      </div>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('verify_otp') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-4">
+        <input
+          class="form-control otp-input"
+          id="otp"
+          name="otp"
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9]{6}"
+          maxlength="6"
+          autocomplete="one-time-code"
+          placeholder="······"
+          required
+          autofocus
+        >
+        <div class="form-text mt-2 text-muted small">Code expires in 10 minutes</div>
+      </div>
+
+      <button class="btn btn-primary w-100 py-2 fw-semibold mb-3" type="submit">
+        Verify &amp; Sign In
+      </button>
+    </form>
+
+    <div class="d-flex justify-content-between align-items-center mt-3 pt-3 border-top small">
+      <form method="post" action="{{ url_for('resend_otp') }}" class="m-0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-link text-decoration-none p-0 small text-primary">
+          Resend Code
+        </button>
+      </form>
+      <a href="{{ url_for('login') }}" class="text-muted text-decoration-none small">
+        ← Back to Login
+      </a>
+    </div>
+
+    {% if dev_otp %}
+      <div class="dev-badge small">
+        <strong>🧪 Development Testing Notice</strong><br>
+        SMTP is in test / simulated mode.<br>
+        Your active OTP code is:
+        <div class="mt-1">
+          <code class="fs-5 fw-bold text-dark bg-white px-2 py-1 rounded border">{{ dev_otp }}</code>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>{{ student.name }} · Student Portal</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .student-shell {
+      max-width: 1140px;
+      margin: 0 auto;
+    }
+    .profile-card {
+      background: linear-gradient(135deg, #ffffff 0%, #f4f7fb 100%);
+      border: 1px solid #e1e7f0;
+    }
+    .avatar-circle {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: #0071e3;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: 700;
+      box-shadow: 0 4px 12px rgba(0, 113, 227, 0.25);
+    }
+    .metric-value-lg {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+    .status-pill {
+      font-size: 0.82rem;
+      padding: 0.35rem 0.85rem;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .pill-good { background: #e8f5e9; color: #2e7d32; }
+    .pill-warn { background: #fff8e1; color: #f57f17; }
+    .pill-danger { background: #ffebee; color: #c62828; }
+  </style>
+</head>
+<body>
+<div class="student-shell my-3">
+  <!-- Top Navigation Surface -->
+  <nav class="card p-3 mb-4 d-flex flex-row justify-content-between align-items-center">
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge bg-primary px-3 py-2 rounded-pill">Student Portal</span>
+      <h5 class="mb-0 ms-2">PresentSync</h5>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('student_timetable') }}">View Timetable</a>
+      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('student_download_pdf') }}">Export PDF</a>
+      <form method="post" action="{{ url_for('logout') }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-outline-secondary btn-sm" type="submit">Sign Out</button>
+      </form>
+    </div>
+  </nav>
+
+  <!-- Profile & Metrics Header -->
+  <div class="row g-3 mb-4">
+    <div class="col-lg-5">
+      <div class="card p-4 h-100 profile-card shadow-sm">
+        <div class="d-flex align-items-center gap-3 mb-3">
+          <div class="avatar-circle">
+            {{ student.name[0].upper() if student.name else 'S' }}
+          </div>
+          <div>
+            <h4 class="mb-0">{{ student.name }}</h4>
+            <span class="text-muted small">Roll: {{ student.roll or 'N/A' }} | Reg: {{ student.reg_no or 'N/A' }}</span>
+          </div>
+        </div>
+        <hr class="my-2">
+        <div class="row g-2 small mt-1">
+          <div class="col-6">
+            <span class="text-muted d-block">Class / Cohort</span>
+            <strong>{{ student.class or '—' }}</strong>
+          </div>
+          <div class="col-6">
+            <span class="text-muted d-block">Section</span>
+            <strong>{{ student.section or '—' }}</strong>
+          </div>
+          <div class="col-12 mt-2">
+            <span class="text-muted d-block">Email Notification Address</span>
+            <strong>{{ student.email or 'No email on record (contact admin)' }}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Attendance Stats Cards -->
+    <div class="col-lg-7">
+      <div class="card p-4 h-100 shadow-sm">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h5 class="mb-0">Attendance Overview</h5>
+          {% if stats.percentage >= 75 %}
+            <span class="status-pill pill-good">&#10003; 75%+ Met: Eligible</span>
+          {% elif stats.percentage >= 60 %}
+            <span class="status-pill pill-warn">&#9888; Warning: Borderline</span>
+          {% else %}
+            <span class="status-pill pill-danger">&#10007; Shortage: Below 60%</span>
+          {% endif %}
+        </div>
+        <div class="row text-center mt-3 g-2">
+          <div class="col-4">
+            <div class="p-3 bg-light rounded-4">
+              <span class="text-muted small d-block">Attended</span>
+              <span class="metric-value-lg text-primary">{{ stats.attended_sessions }}</span>
+              <span class="text-muted small d-block">sessions</span>
+            </div>
+          </div>
+          <div class="col-4">
+            <div class="p-3 bg-light rounded-4">
+              <span class="text-muted small d-block">Total Scheduled</span>
+              <span class="metric-value-lg text-dark">{{ stats.total_sessions }}</span>
+              <span class="text-muted small d-block">sessions</span>
+            </div>
+          </div>
+          <div class="col-4">
+            <div class="p-3 bg-light rounded-4">
+              <span class="text-muted small d-block">Attendance Rate</span>
+              <span class="metric-value-lg {% if stats.percentage >= 75 %}text-success{% elif stats.percentage >= 60 %}text-warning{% else %}text-danger{% endif %}">{{ stats.percentage }}%</span>
+              <span class="text-muted small d-block">overall</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="mt-4">
+          <div class="d-flex justify-content-between small text-muted mb-1">
+            <span>Overall Progress</span>
+            <span>Target: 75% minimum</span>
+          </div>
+          <div class="progress" style="height: 12px;">
+            <div class="progress-bar {% if stats.percentage >= 75 %}bg-success{% elif stats.percentage >= 60 %}bg-warning{% else %}bg-danger{% endif %}"
+                 role="progressbar"
+                 style="width: {{ stats.percentage }}%"
+                 aria-valuenow="{{ stats.percentage }}"
+                 aria-valuemin="0"
+                 aria-valuemax="100"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Attendance History Table -->
+  <div class="card p-4 shadow-sm mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h5 class="mb-0">My Lecture Attendance Log</h5>
+        <small class="text-muted">Verified entries recorded via facial recognition and post-lecture confirmations</small>
+      </div>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('student_timetable') }}">Open Timetable</a>
+    </div>
+
+    {% if records %}
+      <div class="table-responsive">
+        <table class="table table-striped align-middle mb-0">
+          <thead class="table-dark">
+            <tr>
+              <th>#</th>
+              <th>Class / Subject</th>
+              <th>Date</th>
+              <th>Timing</th>
+              <th>Faculty</th>
+              <th>Room</th>
+              <th>Recorded (UTC)</th>
+              <th>Email Receipt</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for r in records %}
+            <tr>
+              <td>{{ loop.index }}</td>
+              <td><strong>{{ r.class_name }}</strong></td>
+              <td>{{ r.class_date or '—' }}</td>
+              <td>{{ r.class_time }} - {{ r.end_time }}</td>
+              <td>{{ r.faculty or '—' }}</td>
+              <td>{{ r.room or 'Main Hall' }}</td>
+              <td><small class="text-muted">{{ r.timestamp[:19] }}</small></td>
+              <td>
+                {% if r.email_sent %}
+                  <span class="badge bg-success">Dispatched</span>
+                {% else %}
+                  <span class="badge bg-secondary">Pending Lecture End</span>
+                {% endif %}
+              </td>
+              <td><span class="badge bg-success">PRESENT</span></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-center py-5 text-muted">
+        <p class="mb-1">No attendance records have been registered for your profile yet.</p>
+        <small>When your instructor starts a scheduled lecture and your face is recognized, it will appear here.</small>
+      </div>
+    {% endif %}
+  </div>
+
+  <footer class="text-center text-muted small py-2">
+    Digital Facial Recognition Attendance System &middot; PresentSync
+  </footer>
+</div>
+</body>
+</html>

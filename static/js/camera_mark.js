@@ -1,9 +1,14 @@
 // camera_mark.js
 const startMarkBtn = document.getElementById("startMarkBtn");
 const stopMarkBtn = document.getElementById("stopMarkBtn");
+const endLectureBtn = document.getElementById("endLectureBtn");
 const markVideo = document.getElementById("markVideo");
 const markStatus = document.getElementById("markStatus");
 const recognizedList = document.getElementById("recognizedList");
+const sessionRecognizedBadge = document.getElementById("sessionRecognizedBadge");
+const unknownFacesContainer = document.getElementById("unknownFacesContainer");
+const unknownCountBadge = document.getElementById("unknownCountBadge");
+const noUnknownMsg = document.getElementById("noUnknownMsg");
 const detectMarkCameraBtn = document.getElementById("detectMarkCameraBtn");
 const markCameraSelect = document.getElementById("markCameraSelect");
 const classSelect = document.getElementById("classSelect");
@@ -12,16 +17,51 @@ const classAttendanceCount = document.getElementById("classAttendanceCount");
 let markStream = null;
 let scanning = false;
 let recognizedIds = new Set();
+let unknownCount = 0;
+let lastUnknownSnapshotTime = 0;
 const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
 
 classSelect.addEventListener("change", () => {
   const option = classSelect.selectedOptions[0];
   recognizedIds = new Set();
   recognizedList.replaceChildren();
+  if (sessionRecognizedBadge) sessionRecognizedBadge.innerText = "0";
   classAttendanceCount.innerText = option && option.value
     ? `Present for this class: ${option.dataset.attendedCount || 0}`
     : "Present for this class: choose a class";
+  if (endLectureBtn) {
+    endLectureBtn.style.display = option && option.value ? "inline-block" : "none";
+  }
 });
+
+if (endLectureBtn) {
+  endLectureBtn.addEventListener("click", async () => {
+    const classId = classSelect.value;
+    if (!classId) return;
+    if (!confirm("End this lecture now and send attendance confirmation emails to all present students?")) {
+      return;
+    }
+    endLectureBtn.disabled = true;
+    try {
+      const res = await fetch(`/classes/${classId}/complete`, {
+        method: "POST",
+        headers: {
+          "X-CSRFToken": csrfToken,
+          "X-Requested-With": "XMLHttpRequest"
+        }
+      });
+      const data = await res.json();
+      alert(data.message || "Lecture completed and attendance emails dispatched.");
+      if (scanning) {
+        stopMarkBtn.click();
+      }
+    } catch (err) {
+      alert("Could not complete lecture: " + err.message);
+    } finally {
+      endLectureBtn.disabled = false;
+    }
+  });
+}
 
 detectMarkCameraBtn.addEventListener("click", async () => {
   detectMarkCameraBtn.disabled = true;
@@ -115,14 +155,42 @@ async function captureAndRecognize() {
       const attendanceKey = `${j.class_id}:${j.student_id}`;
       if (!recognizedIds.has(attendanceKey)) {
         recognizedIds.add(attendanceKey);
+        if (sessionRecognizedBadge) sessionRecognizedBadge.innerText = recognizedIds.size;
         const li = document.createElement("li");
-        li.className = "list-group-item";
-        li.innerText = `${j.name} — ${new Date().toLocaleTimeString()}`;
+        li.className = "list-group-item d-flex justify-content-between align-items-center";
+        li.innerHTML = `<span><strong>${j.name}</strong></span> <span class="badge bg-success rounded-pill">${new Date().toLocaleTimeString()}</span>`;
         recognizedList.prepend(li);
       }
     } else {
       if (j.error) markStatus.innerText = `Not recognized: ${j.error}`;
       else markStatus.innerText = `Not recognized`;
+
+      if (j.unknown_face) {
+        const now = Date.now();
+        if (now - lastUnknownSnapshotTime > 3500) {
+          lastUnknownSnapshotTime = now;
+          unknownCount++;
+          if (unknownCountBadge) unknownCountBadge.innerText = unknownCount;
+          if (noUnknownMsg) noUnknownMsg.style.display = "none";
+
+          const snapDataUrl = canvas.toDataURL("image/jpeg", 0.65);
+          const item = document.createElement("div");
+          item.className = "card p-1 shadow-sm text-center border-danger flex-shrink-0";
+          item.style.width = "76px";
+          item.innerHTML = `
+            <img src="${snapDataUrl}" class="rounded" style="width: 68px; height: 50px; object-fit: cover;">
+            <span class="badge bg-danger mt-1" style="font-size: 8px;">Unknown</span>
+            <span class="text-muted" style="font-size: 8px;">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
+          `;
+          if (unknownFacesContainer) {
+            unknownFacesContainer.prepend(item);
+            if (unknownFacesContainer.children.length > 8) {
+              unknownFacesContainer.removeChild(unknownFacesContainer.lastChild);
+            }
+          }
+        }
+      }
+
       if (j.attendance_window_closed) {
         scanning = false;
         if (markStream) markStream.getTracks().forEach(track => track.stop());

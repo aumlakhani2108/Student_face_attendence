@@ -158,7 +158,8 @@
           <a class="btn btn-outline-secondary me-2" href="/add_student">Add Student</a>
           <a class="btn btn-outline-secondary me-2" href="/classes">Classes</a>
           <a class="btn btn-outline-secondary me-2" href="/mark_attendance">Mark Attendance</a>
-          <a class="btn btn-outline-secondary" href="/attendance_record">Records</a>
+          <a class="btn btn-outline-secondary me-2" href="/attendance_record">Records</a>
+          <a class="btn btn-outline-secondary" href="/manage_admins">Admins</a>
           <form method="post" action="{{ url_for('logout') }}" class="ms-2">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-outline-secondary" type="submit">Log out</button>
@@ -180,6 +181,7 @@
               <a class="btn btn-outline-primary" href="/classes">Create / View Classes</a>
               <a class="btn btn-success" href="/mark_attendance">Mark Attendance</a>
               <a class="btn btn-warning" href="/attendance_record">View Records</a>
+              <a class="btn btn-outline-dark" href="/manage_admins">Manage Admins</a>
             </div>
           </div>
         </div>

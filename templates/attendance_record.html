@@ -10,10 +10,12 @@
 <div class="container my-4">
   <div class="page-header d-flex justify-content-between align-items-center mb-3">
     <h4>Attendance Records</h4>
-    <div class="page-actions">
+    <div class="page-actions d-flex gap-2 flex-wrap">
       {% if selected_class_id %}
+        <a class="btn btn-primary" href="{{ url_for('download_pdf', class_id=selected_class_id) }}">Download Class PDF</a>
         <a class="btn btn-outline-primary" href="{{ url_for('download_csv', class_id=selected_class_id) }}">Download Class CSV</a>
       {% else %}
+        <a class="btn btn-primary" href="{{ url_for('download_pdf') }}">Download All PDF</a>
         <a class="btn btn-outline-primary" href="{{ url_for('download_csv') }}">Download All CSV</a>
       {% endif %}
       <a class="btn btn-outline-secondary" href="/">Back</a>
