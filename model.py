@@ -5,7 +5,9 @@ import cv2
 import numpy as np
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(APP_DIR, "face_embeddings.npz")
+DATA_DIR = os.environ.get("DATA_DIR") or APP_DIR
+os.makedirs(DATA_DIR, exist_ok=True)
+MODEL_PATH = os.path.join(DATA_DIR, "face_embeddings.npz")
 MODEL_DIR = os.path.join(APP_DIR, "models")
 DETECTOR_PATH = os.path.join(MODEL_DIR, "face_detection_yunet_2023mar.onnx")
 RECOGNIZER_PATH = os.path.join(MODEL_DIR, "face_recognition_sface_2021dec.onnx")

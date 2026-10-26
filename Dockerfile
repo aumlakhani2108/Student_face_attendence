@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     curl \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Hugging Face Spaces runs containers as a user with UID 1000
@@ -32,8 +33,15 @@ COPY --chown=user . .
 # Download OpenCV YuNet and SFace ONNX model weights during build
 RUN python download_models.py
 
+# Switch to root to set up entrypoint permissions
+USER root
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Hugging Face Spaces listens on port 7860
 EXPOSE 7860
 
-# Start production WSGI server
-CMD ["gunicorn", "--bind", "0.0.0.0:7860", "--workers", "1", "--threads", "4", "--timeout", "120", "app:app"]
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Start production WSGI server binding to platform port
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-7860} --workers 1 --threads 4 --timeout 120 app:app"]

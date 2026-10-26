@@ -139,3 +139,14 @@ Open <http://127.0.0.1:5000> in the browser:
 - Sign in as **Admin** using the `ADMIN_USERNAME` and `ADMIN_PASSWORD` from `.env`.
 - Sign in as a **Student** using their **Roll Number or Email** and **Password** (set during enrollment).
 
+## Deploy to Render
+
+1. **Connect Repository**: Push this repository to GitHub/GitLab and connect your Render account.
+2. **Create Blueprint**: In the Render Dashboard, select **New +** -> **Blueprint**, and select this repository. Render will automatically parse [`render.yaml`](file:///D:/Information%20Technology/5th/Minor%20Projects/Student_face_attendence/render.yaml).
+3. **Fill Environment Variables**: Fill in the required variables in the dashboard (`ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_EMAIL`, and optional SMTP credentials). `SECRET_KEY` is generated automatically.
+4. **Deploy & Launch**: Click **Apply**. Once deployed, open your `https://<service-name>.onrender.com` URL:
+   - **Webcam Access**: Modern browsers require HTTPS (or localhost) to permit webcam access for enrollment and live attendance capture.
+   - **Persistent Storage**: The configured 1 GB Persistent Disk mounted at `/data` (`attendance-data`) retains `attendance.db`, face photos, and trained embeddings across redeploys and restarts. Note that without a persistent disk, local data is wiped on redeploy.
+   - **Single Instance**: SQLite and local filesystem storage require running exactly **1 instance** (`--workers 1 --threads 4`). Do not scale horizontally to multiple instances.
+
+

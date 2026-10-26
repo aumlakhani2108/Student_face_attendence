@@ -16,9 +16,16 @@ import app as attendance_app
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(attendance_app, "DB_PATH", str(tmp_path / "attendance.db"))
-    monkeypatch.setattr(attendance_app, "DATASET_DIR", str(tmp_path / "dataset"))
-    monkeypatch.setattr(attendance_app, "TRAIN_STATUS_FILE", str(tmp_path / "train_status.json"))
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    monkeypatch.setattr(attendance_app, "DATA_DIR", str(data_dir))
+    monkeypatch.setattr(attendance_app, "DB_PATH", str(data_dir / "attendance.db"))
+    monkeypatch.setattr(attendance_app, "DATASET_DIR", str(data_dir / "dataset"))
+    monkeypatch.setattr(attendance_app, "TRAIN_STATUS_FILE", str(data_dir / "train_status.json"))
+    import model as face_model
+    monkeypatch.setattr(face_model, "DATA_DIR", str(data_dir))
+    monkeypatch.setattr(face_model, "MODEL_PATH", str(data_dir / "face_embeddings.npz"))
     attendance_app.app.config.update(
         TESTING=True,
         WTF_CSRF_ENABLED=False,
@@ -148,19 +155,20 @@ def test_face_upload_rejects_invalid_image_bytes(client):
         assert conn.execute("SELECT COUNT(*) FROM student_faces").fetchone()[0] == 0
 
 
-def test_legacy_face_files_migrate_to_database(client, tmp_path):
+def test_legacy_face_files_migrate_to_database(client):
     with sqlite3.connect(attendance_app.DB_PATH) as conn:
         student_id = conn.execute("INSERT INTO students (name) VALUES (?)", ("Ada",)).lastrowid
-    folder = tmp_path / "dataset" / str(student_id)
-    folder.mkdir(parents=True)
+    folder = os.path.join(attendance_app.DATASET_DIR, str(student_id))
+    os.makedirs(folder, exist_ok=True)
     ok, encoded = cv2.imencode(".jpg", np.zeros((32, 32, 3), dtype=np.uint8))
     assert ok
-    image_path = folder / "legacy.jpg"
-    image_path.write_bytes(encoded.tobytes())
+    image_path = os.path.join(folder, "legacy.jpg")
+    with open(image_path, "wb") as f:
+        f.write(encoded.tobytes())
 
     attendance_app.migrate_dataset_images()
 
-    assert not image_path.exists()
+    assert not os.path.exists(image_path)
     with sqlite3.connect(attendance_app.DB_PATH) as conn:
         image = conn.execute("SELECT image FROM student_faces WHERE student_id = ?", (student_id,)).fetchone()[0]
     assert image == encoded.tobytes()
@@ -1025,4 +1033,73 @@ def test_unauthorized_users_cannot_access_manage_admins(client):
     student_try = client.get("/manage_admins")
     assert student_try.status_code == 302
     assert "/login" in student_try.headers["Location"]
+
+
+def test_healthz_route(client):
+    response = client.get("/healthz")
+    assert response.status_code == 200
+    assert response.data == b"ok"
+
+
+def test_data_dir_configuration(tmp_path, monkeypatch):
+    custom_data = tmp_path / "custom_data"
+    monkeypatch.setenv("DATA_DIR", str(custom_data))
+    import importlib
+    import model as face_model
+    import app as attendance_app_mod
+
+    importlib.reload(face_model)
+    importlib.reload(attendance_app_mod)
+
+    assert attendance_app_mod.DATA_DIR == str(custom_data)
+    assert attendance_app_mod.DB_PATH == str(custom_data / "attendance.db")
+    assert attendance_app_mod.DATASET_DIR == str(custom_data / "dataset")
+    assert attendance_app_mod.TRAIN_STATUS_FILE == str(custom_data / "train_status.json")
+    assert face_model.DATA_DIR == str(custom_data)
+    assert face_model.MODEL_PATH == str(custom_data / "face_embeddings.npz")
+    assert custom_data.exists()
+
+
+def test_production_safety_checks(monkeypatch, tmp_path):
+    test_data = tmp_path / "test_data"
+    test_data.mkdir()
+    monkeypatch.setenv("DATA_DIR", str(test_data))
+
+    import importlib
+    import app as app_mod
+
+    # 1. Default SECRET_KEY with RENDER set raises RuntimeError
+    monkeypatch.setenv("FLASK_DEBUG", "0")
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("COOKIE_SECURE", "0")
+    monkeypatch.setenv("SECRET_KEY", app_mod.DEFAULT_SECRET_KEY)
+    monkeypatch.setenv("ADMIN_PASSWORD", "custom-admin-password")
+    with pytest.raises(RuntimeError, match="Default SECRET_KEY is not allowed in production"):
+        importlib.reload(app_mod)
+
+    # 2. Default ADMIN_PASSWORD with COOKIE_SECURE=1 raises RuntimeError
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setenv("COOKIE_SECURE", "1")
+    monkeypatch.setenv("SECRET_KEY", "custom-secret-key-123456789012345678")
+    monkeypatch.setenv("ADMIN_PASSWORD", app_mod.DEFAULT_ADMIN_PASSWORD)
+    with pytest.raises(RuntimeError, match="Default ADMIN_PASSWORD"):
+        importlib.reload(app_mod)
+
+    # 3. In debug mode (FLASK_DEBUG=1), defaults are allowed even in production environment
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("COOKIE_SECURE", "1")
+    monkeypatch.setenv("FLASK_DEBUG", "1")
+    monkeypatch.setenv("SECRET_KEY", app_mod.DEFAULT_SECRET_KEY)
+    monkeypatch.setenv("ADMIN_PASSWORD", app_mod.DEFAULT_ADMIN_PASSWORD)
+    importlib.reload(app_mod)
+    assert app_mod.app.config["SECRET_KEY"] == app_mod.DEFAULT_SECRET_KEY
+
+    # Clean up environment back to safe testing defaults
+    monkeypatch.setenv("FLASK_DEBUG", "1")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setenv("COOKIE_SECURE", "0")
+    monkeypatch.setenv("SECRET_KEY", "test-session-key-that-is-long-enough")
+    monkeypatch.setenv("ADMIN_PASSWORD", "test-password-long-enough")
+    importlib.reload(app_mod)
+
 

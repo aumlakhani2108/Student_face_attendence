@@ -28,16 +28,21 @@ from model import (
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(APP_DIR, ".env"))
-DB_PATH = os.path.join(APP_DIR, "attendance.db")
-DATASET_DIR = os.path.join(APP_DIR, "dataset")
-TRAIN_STATUS_FILE = os.path.join(APP_DIR, "train_status.json")
+DATA_DIR = os.environ.get("DATA_DIR") or APP_DIR
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, "attendance.db")
+DATASET_DIR = os.path.join(DATA_DIR, "dataset")
+TRAIN_STATUS_FILE = os.path.join(DATA_DIR, "train_status.json")
 os.makedirs(DATASET_DIR, exist_ok=True)
+
+DEFAULT_SECRET_KEY = "biobytes-default-session-secret-key-32b"
+DEFAULT_ADMIN_PASSWORD = "admin123"
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config.update(
-    SECRET_KEY=os.environ.get("SECRET_KEY") or "biobytes-default-session-secret-key-32b",
+    SECRET_KEY=os.environ.get("SECRET_KEY") or DEFAULT_SECRET_KEY,
     ADMIN_USERNAME=os.environ.get("ADMIN_USERNAME") or "admin",
-    ADMIN_PASSWORD=os.environ.get("ADMIN_PASSWORD") or "admin123",
+    ADMIN_PASSWORD=os.environ.get("ADMIN_PASSWORD") or DEFAULT_ADMIN_PASSWORD,
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -46,6 +51,15 @@ app.config.update(
 )
 if len(app.config["ADMIN_PASSWORD"]) < 6:
     raise RuntimeError("ADMIN_PASSWORD must be at least 6 characters long.")
+
+is_production = os.environ.get("FLASK_DEBUG") != "1" and (
+    "RENDER" in os.environ or os.environ.get("COOKIE_SECURE") == "1"
+)
+if is_production:
+    if app.config["SECRET_KEY"] == DEFAULT_SECRET_KEY:
+        raise RuntimeError("Production deployment error: Default SECRET_KEY is not allowed in production. Set a secure SECRET_KEY.")
+    if app.config["ADMIN_PASSWORD"] == DEFAULT_ADMIN_PASSWORD:
+        raise RuntimeError("Production deployment error: Default ADMIN_PASSWORD ('admin123') is not allowed in production. Set a secure ADMIN_PASSWORD.")
 
 CSRFProtect(app)
 training_lock = threading.Lock()
@@ -336,7 +350,7 @@ if initial_status.get("running"):
 
 @app.before_request
 def require_login():
-    if request.endpoint in {"login", "verify_otp", "resend_otp", "static"}:
+    if request.endpoint in {"login", "verify_otp", "resend_otp", "static", "healthz"}:
         return None
 
     is_admin = session.get("admin_authenticated") or session.get("role") == "admin"
@@ -426,6 +440,11 @@ def verify_admin_password(admin_data, input_password):
         ):
             return True
     return False
+
+
+@app.route("/healthz", methods=["GET"])
+def healthz():
+    return "ok", 200
 
 
 @app.route("/login", methods=["GET", "POST"])
