@@ -278,11 +278,7 @@ video {
   padding: clamp(1.75rem, 4vw, 3.25rem);
   isolation: isolate;
   color: #fff;
-  background-color: #1b4d91;
-  background-image: url("../images/bg.png");
-  background-repeat: no-repeat;
-  background-position: left center;
-  background-size: auto 100%;
+  background: linear-gradient(145deg, #0b1e36 0%, #16365c 40%, #0071e3 100%);
 }
 
 .login-illustration::before,
