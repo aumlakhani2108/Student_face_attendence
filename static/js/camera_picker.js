@@ -42,14 +42,24 @@ window.CameraPicker = {
   },
 
   async open(select) {
-    if (!select.value) await this.detect(select);
-    return navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        deviceId: { exact: select.value },
-        width: { ideal: 640 },
-        height: { ideal: 480 }
+    if (!select.value) {
+      try {
+        await this.detect(select);
+      } catch (e) {
+        console.warn("Auto-detect failed, using default camera constraints:", e);
       }
-    });
+    }
+    const constraints = {
+      audio: false,
+      video: select.value
+        ? { deviceId: { ideal: select.value }, width: { ideal: 640 }, height: { ideal: 480 } }
+        : { width: { ideal: 640 }, height: { ideal: 480 } }
+    };
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err) {
+      console.warn("Ideal camera constraints failed, attempting fallback to basic video stream...", err);
+      return await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
   }
 };

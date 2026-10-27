@@ -15,7 +15,7 @@ def generate_otp(length=6):
 
 
 def send_otp_email(to_email, otp_code, purpose="Sign In"):
-    subject = f"Your PresentSync Verification Code: {otp_code}"
+    subject = f"Your BioBytes Verification Code: {otp_code}"
     body_text = f"""Hello,
 
 Your verification code for {purpose} is:
@@ -25,7 +25,7 @@ Your verification code for {purpose} is:
 This code is valid for 10 minutes. If you did not request this code, please ignore this email.
 
 Regards,
-PresentSync Attendance System
+BioBytes Attendance System
 """
     body_html = f"""<!doctype html>
 <html>
@@ -45,7 +45,7 @@ PresentSync Attendance System
 <body>
   <div class="card">
     <div class="header">
-      <h2>PresentSync Security Verification</h2>
+      <h2>BioBytes Security Verification</h2>
     </div>
     <div class="content">
       <p style="margin: 0; font-size: 15px;">Use the code below to complete your <strong>{purpose}</strong>:</p>
@@ -53,7 +53,7 @@ PresentSync Attendance System
       <p class="note">This code will expire in <strong>10 minutes</strong>.<br>If you did not request this verification, please contact your administrator immediately.</p>
     </div>
     <div class="footer">
-      Automated verification sent by PresentSync Digital Facial Attendance System.
+      Automated verification sent by BioBytes Digital Facial Attendance System.
     </div>
   </div>
 </body>
@@ -62,11 +62,13 @@ PresentSync Attendance System
 
 
 def get_mail_config():
+    raw_pwd = os.environ.get("SMTP_PASSWORD", "").strip()
+    normalized_pwd = raw_pwd.replace(" ", "").replace('"', '').replace("'", "")
     return {
         "host": os.environ.get("SMTP_HOST", "").strip(),
-        "port": int(os.environ.get("SMTP_PORT", "587")),
+        "port": int(os.environ.get("SMTP_PORT", "465")),
         "user": os.environ.get("SMTP_USER", "").strip(),
-        "password": os.environ.get("SMTP_PASSWORD", "").strip(),
+        "password": normalized_pwd,
         "use_tls": os.environ.get("SMTP_USE_TLS", "1") == "1",
         "sender": os.environ.get("MAIL_SENDER", "").strip()
         or os.environ.get("SMTP_USER", "attendance@school.edu"),
@@ -128,7 +130,7 @@ Status: PRESENT
 This is an automated confirmation sent upon the completion of the lecture.
 
 Regards,
-Attendance Management System
+BioBytes Attendance System
 """
 
     body_html = f"""<!doctype html>
@@ -155,7 +157,7 @@ Attendance Management System
   <div class="card">
     <div class="header">
       <h2>Attendance Confirmation</h2>
-      <p>Digital Facial Recognition Attendance System</p>
+      <p>BioBytes · Digital Facial Recognition Attendance System</p>
     </div>
     <div class="content">
       <div class="badge">&#10003; PRESENT RECORDED</div>
@@ -245,3 +247,65 @@ def dispatch_post_lecture_emails(class_id, connect_db_func):
         skipped_count,
     )
     return {"sent": sent_count, "failed": failed_count, "skipped": skipped_count}
+
+
+def test_smtp_connection(target_email=None):
+    """Tests the SMTP configuration and optionally sends a verification test email."""
+    cfg = get_mail_config()
+    if not cfg["host"] or not cfg["user"]:
+        return {
+            "success": False,
+            "configured": False,
+            "message": "SMTP is unconfigured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASSWORD in .env."
+        }
+
+    try:
+        if cfg["port"] == 465:
+            server = smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=10)
+        else:
+            server = smtplib.SMTP(cfg["host"], cfg["port"], timeout=10)
+            if cfg["use_tls"]:
+                server.starttls()
+
+        if cfg["user"] and cfg["password"]:
+            try:
+                server.login(cfg["user"], cfg["password"])
+            except (smtplib.SMTPAuthenticationError, smtplib.SMTPServerDisconnected) as auth_err:
+                try:
+                    server.close()
+                except Exception:
+                    pass
+                return {
+                    "success": False,
+                    "configured": True,
+                    "message": (
+                        f"Authentication failed for '{cfg['user']}': Google rejected the App Password (BadCredentials). "
+                        "Please ensure 2-Step Verification is active on this account, and generate a new 16-character App Password at "
+                        "https://myaccount.google.com/apppasswords."
+                    )
+                }
+
+        if target_email:
+            msg = EmailMessage()
+            msg["Subject"] = "BioBytes SMTP Pipeline Verification"
+            msg["From"] = cfg["sender"]
+            msg["To"] = target_email
+            msg.set_content(
+                f"Hello,\n\nThis is a verification email from your BioBytes Attendance System.\n"
+                f"SMTP Host: {cfg['host']}:{cfg['port']}\n"
+                f"Sender: {cfg['sender']}\n\n"
+                f"If you received this email, your automated email delivery pipeline is fully functional!\n\n"
+                f"Regards,\nBioBytes Attendance System"
+            )
+            server.send_message(msg)
+
+        server.quit()
+        return {
+            "success": True,
+            "configured": True,
+            "message": f"Successfully connected to {cfg['host']}:{cfg['port']}" + (f" and sent test email to {target_email}" if target_email else ".")
+        }
+    except smtplib.SMTPAuthenticationError as auth_err:
+        return {"success": False, "configured": True, "message": f"SMTP Authentication failed: {auth_err}. Check your username and App Password."}
+    except Exception as exc:
+        return {"success": False, "configured": True, "message": f"SMTP connection error: {exc}"}

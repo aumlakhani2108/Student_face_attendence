@@ -18,9 +18,9 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: ADMIN_USERNAME
-        sync: false
+        value: admin
       - key: ADMIN_PASSWORD
-        sync: false
+        generateValue: true
       - key: ADMIN_EMAIL
         sync: false
       - key: SMTP_HOST

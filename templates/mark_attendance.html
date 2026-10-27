@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="csrf-token" content="{{ csrf_token() }}">
-  <title>Mark Attendance</title>
+  <title>Mark Attendance · BioBytes</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
@@ -12,11 +12,11 @@
   <div class="card p-4 shadow-sm">
     <div class="page-header d-flex justify-content-between align-items-center">
       <h4>Mark Attendance (Live)</h4>
-      <div class="page-actions">
+      <div class="page-actions d-flex gap-2">
         <a class="btn btn-outline-secondary" href="{{ url_for('index') }}">Back</a>
-        <button id="detectMarkCameraBtn" class="btn btn-outline-primary">Detect cameras</button>
+        <button id="detectMarkCameraBtn" class="btn btn-outline-primary" type="button">Detect cameras</button>
         <button id="startMarkBtn" class="btn btn-primary" {% if not has_open_class %}disabled{% endif %}>Start</button>
-        <button id="stopMarkBtn" class="btn btn-danger" disabled>Stop</button>
+        <button id="stopMarkBtn" class="btn btn-danger" type="button" disabled>Stop</button>
         <button id="endLectureBtn" class="btn btn-warning" type="button" style="display:none;">End Lecture &amp; Send Emails</button>
         <form method="post" action="{{ url_for('logout') }}" class="d-inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -27,41 +27,45 @@
 
     <div class="row mt-3">
       <div class="col-md-7 text-center">
-        <label class="form-label text-start d-block" for="classSelect">Class session</label>
+        <label class="form-label text-start d-block fw-semibold" for="classSelect">Class / Lecture Session</label>
         <select id="classSelect" class="form-select mb-3" required {% if not classes %}disabled{% endif %}>
           {% if classes %}
             <option value="">Choose a class before starting</option>
             {% for class_item in classes %}
-              <option value="{{ class_item.id }}" data-attended-count="{{ class_item.attended_count }}" {% if not class_item.attendance_open %}disabled{% endif %}>{{ class_item.name }} — {{ class_item.class_date }} {{ class_item.class_time }}-{{ class_item.end_time }} local time ({{ class_item.faculty }})</option>
+              <option value="{{ class_item.id }}" data-attended-count="{{ class_item.attended_count }}" {% if not class_item.attendance_open %}disabled{% endif %}>
+                {{ class_item.name }} — {{ class_item.class_date }} {{ class_item.class_time }}-{{ class_item.end_time }} local time ({{ class_item.faculty }})
+              </option>
             {% endfor %}
           {% else %}
             <option value="">Create a class before marking attendance</option>
           {% endif %}
         </select>
         {% if not classes %}
-          <p class="small text-muted">No classes are available. <a href="{{ url_for('classes_page') }}">Create a class</a> first.</p>
+          <p class="small text-muted text-start">No classes are available. <a href="{{ url_for('classes_page') }}">Create a class</a> first.</p>
         {% elif not has_open_class %}
-          <p class="small text-muted">Attendance can only be marked during a class's scheduled time. No class is currently open.</p>
+          <p class="small text-muted text-start">Attendance can only be marked during a class's scheduled time. No class is currently open. You can <a href="{{ url_for('classes_page') }}">create or schedule</a> an active class session.</p>
         {% endif %}
-        <p id="classAttendanceCount" class="small text-muted" aria-live="polite">
+        <p id="classAttendanceCount" class="small text-muted text-start" aria-live="polite">
           {% if classes %}Present for this class: choose a class{% endif %}
         </p>
-        <label class="form-label" for="markCameraSelect">Webcam (choose the laptop's built-in webcam)</label>
+
+        <label class="form-label text-start d-block" for="markCameraSelect">Webcam (choose laptop built-in webcam)</label>
         <select id="markCameraSelect" class="form-select mb-3" disabled>
           <option value="">Detect cameras first</option>
         </select>
-        <video id="markVideo" autoplay muted playsinline></video>
-        <div id="markStatus" class="mt-2 small text-muted">Waiting...</div>
+        <video id="markVideo" autoplay muted playsinline style="max-height: 380px; width: 100%; object-fit: cover; border-radius: 12px; background: #000;"></video>
+        <div id="markStatus" class="mt-2 small text-muted">Waiting to start camera...</div>
       </div>
+
       <div class="col-md-5">
         <div class="d-flex justify-content-between align-items-center mb-2">
-          <h6 class="mb-0">Recognized Students (Session)</h6>
+          <h6 class="mb-0 fw-semibold">Recognized Students (Session)</h6>
           <span id="sessionRecognizedBadge" class="badge bg-success rounded-pill">0</span>
         </div>
         <ul id="recognizedList" class="list-group mb-4" style="max-height: 230px; overflow-y: auto;"></ul>
 
         <div class="d-flex justify-content-between align-items-center mb-2">
-          <h6 class="mb-0 text-danger">&#9888; Unknown / Unregistered Faces</h6>
+          <h6 class="mb-0 text-danger fw-semibold">&#9888; Unknown / Unregistered Faces</h6>
           <span id="unknownCountBadge" class="badge bg-danger rounded-pill">0</span>
         </div>
         <div id="unknownFacesContainer" class="d-flex gap-2 flex-wrap p-2 border rounded bg-light" style="min-height: 90px; max-height: 190px; overflow-y: auto;">
