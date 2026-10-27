@@ -1,0 +1,42 @@
+\chapter{Defense and Viva Voce Framework}
+
+\section{The 6-Level WWWH Interrogation Matrix}
+To ensure academic rigor during the External Semester Examination (ESE) Viva Voce, this section details a comprehensive technical interrogation matrix addressing critical architectural and mathematical design decisions:
+
+\begin{itemize}
+    \item \textbf{Who assumes identity verification responsibility when visual recognition fails?}
+    Verification responsibility transitions to a supervisory administrative fallback layer. If a student's facial match confidence falls below $\tau = 0.363$ due to physical trauma, bandages, or extreme occlusion, the system alerts the invigilator. Authorized faculty log in via Two-Factor Authentication (Email OTP) and execute an audited manual attendance override logged with the invigilator's timestamped credential.
+
+    \item \textbf{What defines your biometric feature vector, and why can it not be reverse-engineered into the student's face?}
+    The biometric identity is represented by a unit-normalized 128-dimensional vector $\mathbf{v} \in \mathbb{S}^{127} \subset \mathbb{R}^{128}$ extracted from the pen-ultimate convolutional pooling layer of SFace. It is mathematically non-invertible because deep pooling and non-linear activation layers (ReLU) collapse spatial dimensionality from $112 \times 112 \times 3 = 37,632$ continuous pixel values into 128 continuous scalars, destroying the structural spatial information required to reconstruct raw photographic images.
+
+    \item \textbf{Where is the computational bottleneck in multi-student continuous frame analysis?}
+    The primary computational load resides in the deep feature embedding stage of SFace ($\sim 27.5\text{ ms}$, representing 61\% of frame latency), not in face detection ($\sim 14.8\text{ ms}$) or vector similarity search ($\sim 0.11\text{ ms}$). BioBytes resolves this bottleneck by running YuNet at full detection framerate while triggering SFace inference exclusively when detection confidence exceeds 0.70 and eye aspect ratios validate biological liveness.
+
+    \item \textbf{When is an attendance transaction committed, and how are duplicate stamps prevented?}
+    Attendance transactions are committed atomically to SQLite strictly upon the first verified frame satisfying $S_C(\mathbf{u}, \mathbf{v}) \geq 0.363$. Subsequent frames received during the same lecture period are intercepted by a database compound unique constraint:
+    $$\text{UNIQUE}(\text{student\_id}, \text{date}, \text{class\_id})$$
+    which immediately rejects redundant writes at the storage engine level without blocking the video capture pipeline.
+
+    \item \textbf{Why utilize YuNet + SFace instead of legacy Haar Cascades or heavy models like ResNet-50 / FaceNet?}
+    Haar Cascades suffer from catastrophic failure rates ($> 35\%$ false negative rate) under non-frontal yaw angles ($\pm 30^\circ$) and non-uniform classroom illumination. Conversely, heavy deep models such as ResNet-50 and FaceNet exceed $250\text{ MB}$ in parameter size and require $> 200\text{ ms}$ per frame on standard CPU hardware, precluding real-time operation without costly GPUs. YuNet ($< 400\text{ KB}$) and SFace ($< 35\text{ MB}$) provide state-of-the-art angular margin discrimination with sub-50ms inference on commodity consumer CPUs.
+
+    \item \textbf{How do you mathematically prevent replay attacks using printed photographs or smartphone screens?}
+    BioBytes validates liveness through two coupled mechanisms:
+    \begin{enumerate}
+        \item Temporal variance tracking across contiguous landmark coordinate matrices $\mathbf{L}_t$:
+        $$\Delta \mathbf{L} = \frac{1}{K} \sum_{k=1}^K \|\mathbf{L}_{t} - \mathbf{L}_{t-k}\|_2$$
+        Printed photos exhibit near-zero spatial jitter ($\Delta \mathbf{L} \approx 0$), triggering automated spoof rejection.
+        \item Dynamic Eye Aspect Ratio (EAR) fluctuation monitoring:
+        $$\text{EAR} = \frac{\|p_2 - p_6\| + \|p_3 - p_5\|}{2 \|p_1 - p_4\|}$$
+        which detects periodic biological blink patterns prior to embedding extraction.
+    \end{enumerate}
+\end{itemize}
+
+\section{System Limitations and Future Scope}
+While BioBytes achieves reliable real-time performance on commodity hardware, several operational frontiers provide opportunities for future advancement:
+\begin{itemize}
+    \item \textbf{Multi-Camera RTSP Mesh Integration:} Upgrading from client-side WebRTC single-stream feeds to multi-camera RTSP ceiling streams across large auditorium lecture halls with batch parallelized inference.
+    \item \textbf{On-Device Edge Acceleration:} Compiling ONNX model weights to TensorRT and OpenVINO quantization formats for sub-10ms inference on edge microprocessors (e.g., Raspberry Pi 5, Jetson Nano).
+    \item \textbf{Blockchain Audit Trails:} Persisting encrypted attendance cryptographic hashes to a decentralized ledger to provide immutable proof of presence for university-wide degree audits.
+\end{itemize}

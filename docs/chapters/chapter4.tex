@@ -1,0 +1,72 @@
+\chapter{Data Design and System Implementation}
+
+\section{Relational Schema Architecture and Invariants}
+BioBytes utilizes an ACID-compliant SQLite relational database architecture. The system stores high-dimensional biometric vectors as serialized continuous binary floating-point buffers (BLOBs) alongside relational student metadata.
+
+\begin{figure}[htbp]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{|l|l|p{8.5cm}|}
+\hline
+\textbf{Entity} & \textbf{Primary Key} & \textbf{Attributes \& Invariants} \\
+\hline
+\texttt{students} & \texttt{id} (INTEGER) & \texttt{enrollment\_no} (UNIQUE VARCHAR), \texttt{name}, \texttt{class\_id}, \texttt{email}, \texttt{created\_at} \\
+\texttt{face\_embeddings} & \texttt{id} (INTEGER) & \texttt{student\_id} (FK $\to$ students), \texttt{embedding} (BLOB 512 bytes), \texttt{sample\_idx} \\
+\texttt{attendance\_logs} & \texttt{id} (INTEGER) & \texttt{student\_id} (FK), \texttt{class\_id}, \texttt{date}, \texttt{timestamp}, \texttt{status}, \texttt{confidence} \\
+\texttt{timetable} & \texttt{id} (INTEGER) & \texttt{class\_id}, \texttt{subject}, \texttt{day\_of\_week}, \texttt{start\_time}, \texttt{end\_time} \\
+\texttt{admins} & \texttt{id} (INTEGER) & \texttt{username} (UNIQUE), \texttt{password\_hash} (PBKDF2), \texttt{email}, \texttt{role} \\
+\hline
+\end{tabular}
+\caption{BioBytes Relational Database Schema Architecture}
+\label{fig:schema_table}
+\end{figure}
+
+\subsection{BLOB Serialization of 128-D Hypersphere Vectors}
+Each 128-dimensional unit embedding $\mathbf{v} \in \mathbb{R}^{128}$ comprises 128 single-precision 32-bit floating-point numbers:
+\begin{equation}
+\text{Memory Size} = 128 \times 4\text{ bytes} = 512\text{ bytes}
+\end{equation}
+Embeddings are serialized directly via contiguous NumPy byte-buffers:
+\begin{verbatim}
+blob_data = embedding.astype(np.float32).tobytes()
+\end{verbatim}
+During matching cycles, gallery vectors are retrieved in batch into contiguous memory buffers, achieving $\mathcal{O}(1)$ vectorized matrix dot products via BLAS acceleration.
+
+\subsection{Transactional Integrity and Anti-Duplication Constraint}
+When a student stands before the active video camera, the browser streaming loop continuously dispatches frames at 2 Hz. To prevent duplicate attendance logging, the database enforces a compound relational constraint:
+\begin{verbatim}
+CREATE UNIQUE INDEX idx_attendance_unique 
+ON attendance_logs (student_id, date, class_id);
+\end{verbatim}
+Any secondary matching frame for an already-authenticated student during the same lecture session triggers an atomic `sqlite3.IntegrityError` at the storage layer, which is captured and rendered gracefully in the UI as ``Attendance Already Recorded'' without disk corruption.
+
+\section{Role-Based Administrative Security and Two-Factor Authentication}
+BioBytes strictly segregates institutional access into privileged administrative roles and student read-only roles.
+
+\subsection{PBKDF2-SHA256 Password Cryptography}
+Administrative credentials are never stored in plain text. Passwords undergo key stretching via PBKDF2 (Password-Based Key Derivation Function 2) utilizing a SHA-256 HMAC digest with 600,000 computational iterations and a 16-byte cryptographically random salt generated via `os.urandom(16)`.
+
+\subsection{Two-Factor Authentication via SMTP Email OTP}
+To protect against unauthorized administrative session hijacking:
+\begin{enumerate}
+    \item Upon valid primary credential verification, the system generates a cryptographically secure 6-digit numerical token:
+    \begin{equation}
+    \text{OTP} = \text{CSPRNG}(100000, 999999)
+    \end{equation}
+    \item The token is persisted to an in-memory ephemeral cache with a strict 300-second (5-minute) expiration TTL.
+    \item The token is dispatched asynchronously to the registered administrator email via SMTPLib over TLS (Port 587).
+    \item Access to administrative dashboards, student enrollment, and manual override controls is granted exclusively upon token validation.
+\end{enumerate}
+
+\section{Automated Compliance Reporting via ReportLab}
+Regulatory and academic audit compliance requires verifiable physical and digital attendance registers. BioBytes incorporates an automated PDF compilation engine built upon the ReportLab library:
+\begin{itemize}
+    \item \textbf{Dynamic Aggregation:} Queries historical attendance tables grouped by class, subject, and date range.
+    \item \textbf{Statistical Attendance Index:} Computes individual student attendance percentages:
+    \begin{equation}
+    P_i = \left( \frac{\text{Lectures Attended}_i}{\text{Total Lectures Conducted}} \right) \times 100\%
+    \end{equation}
+    highlighting students failing the statutory GTU 75\% attendance threshold.
+    \item \textbf{Standardized Institutional Layout:} Generates formatted tabular documents featuring institution headers, date ranges, authorized instructor signature blocks, and official timestamps.
+\end{itemize}

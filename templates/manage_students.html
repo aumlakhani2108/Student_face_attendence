@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Student Directory · BioBytes</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+  <style>
+    .glass-surface {
+      background: rgba(255, 255, 255, 0.92);
+      border-radius: 16px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+    }
+    .badge-pill-soft {
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .badge-success-soft { background: #e8f5e9; color: #2e7d32; }
+    .badge-warning-soft { background: #fff8e1; color: #f57f17; }
+    .badge-danger-soft { background: #ffebee; color: #c62828; }
+    .badge-info-soft { background: #e3f2fd; color: #1565c0; }
+    .avatar-placeholder {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #e8f3ff;
+      color: #0071e3;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 1rem;
+    }
+    .profile-stat-box {
+      background: #f8fafc;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+      border: 1px solid #e2e8f0;
+    }
+    .profile-stat-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #0071e3;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container my-4" style="max-width: 1240px;">
+  <!-- Header & Navigation -->
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+    <div>
+      <h3 class="fw-bold mb-1">Student Directory</h3>
+      <p class="text-muted small mb-0">Manage enrolled students, sort by divisions, and inspect attendance summaries.</p>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-primary" href="{{ url_for('add_student') }}">+ Add New Student</a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('index') }}">Back to Dashboard</a>
+    </div>
+  </div>
+
+  <!-- Filters & Sorting Bar -->
+  <div class="card glass-surface p-3 mb-4">
+    <form method="get" action="{{ url_for('manage_students') }}" class="row g-2 align-items-end">
+      <!-- Search Input -->
+      <div class="col-md-4">
+        <label class="form-label small fw-semibold text-muted" for="searchInput">Search Student</label>
+        <input class="form-control" id="searchInput" name="search" placeholder="Name, Roll No, Enrollment, Email..." value="{{ search }}">
+      </div>
+
+      <!-- Division Filter -->
+      <div class="col-md-3">
+        <label class="form-label small fw-semibold text-muted" for="divisionSelect">Filter by Division / Class</label>
+        <select class="form-select" id="divisionSelect" name="division">
+          <option value="">All Divisions ({{ total_students }} students)</option>
+          {% for div in divisions %}
+            <option value="{{ div }}" {% if selected_division == div %}selected{% endif %}>{{ div }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Sort By -->
+      <div class="col-md-3">
+        <label class="form-label small fw-semibold text-muted" for="sortSelect">Sort By</label>
+        <select class="form-select" id="sortSelect" name="sort">
+          <option value="name_asc" {% if sort_by == 'name_asc' %}selected{% endif %}>Name (A → Z)</option>
+          <option value="name_desc" {% if sort_by == 'name_desc' %}selected{% endif %}>Name (Z → A)</option>
+          <option value="division_asc" {% if sort_by == 'division_asc' %}selected{% endif %}>Division (Class &amp; Sec)</option>
+          <option value="roll_asc" {% if sort_by == 'roll_asc' %}selected{% endif %}>Roll Number (Ascending)</option>
+          <option value="attendance_high" {% if sort_by == 'attendance_high' %}selected{% endif %}>Attendance (Highest first)</option>
+          <option value="attendance_low" {% if sort_by == 'attendance_low' %}selected{% endif %}>Attendance (Lowest first)</option>
+        </select>
+      </div>
+
+      <!-- Filter Buttons -->
+      <div class="col-md-2 d-flex gap-2">
+        <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
+        {% if search or selected_division or sort_by != 'name_asc' %}
+          <a href="{{ url_for('manage_students') }}" class="btn btn-outline-secondary" title="Reset Filters">✕</a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <!-- Students Table -->
+  <div class="card glass-surface p-0 overflow-hidden">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-3">Student</th>
+            <th>Roll / Reg No</th>
+            <th>Division</th>
+            <th>Biometric Status</th>
+            <th>Attendance %</th>
+            <th class="text-end pe-3">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if students %}
+            {% for s in students %}
+              <tr>
+                <td class="ps-3">
+                  <div class="d-flex align-items-center gap-2">
+                    <div class="avatar-placeholder">{{ s.name[0]|upper }}</div>
+                    <div>
+                      <div class="fw-semibold text-dark">{{ s.name }}</div>
+                      <div class="text-muted small">{{ s.email }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span class="badge bg-light text-dark border">Roll: {{ s.roll }}</span>
+                  {% if s.reg_no and s.reg_no != '—' %}
+                    <br><span class="text-muted small">Reg: {{ s.reg_no }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="badge bg-secondary-subtle text-secondary border">{{ s.division }}</span>
+                </td>
+                <td>
+                  {% if s.face_count > 0 %}
+                    <span class="badge-pill-soft badge-success-soft">
+                      ✓ {{ s.face_count }} Samples
+                    </span>
+                  {% else %}
+                    <span class="badge-pill-soft badge-danger-soft">
+                      ✕ No Faces Enrolled
+                    </span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="d-flex align-items-center gap-2">
+                    <div class="progress flex-grow-1" style="height: 8px; width: 60px;">
+                      <div class="progress-bar {% if s.attendance_pct >= 75 %}bg-success{% elif s.attendance_pct >= 60 %}bg-warning{% else %}bg-danger{% endif %}"
+                           style="width: {{ s.attendance_pct }}%"></div>
+                    </div>
+                    <span class="fw-semibold small {% if s.attendance_pct >= 75 %}text-success{% elif s.attendance_pct >= 60 %}text-warning{% else %}text-danger{% endif %}">
+                      {{ s.attendance_pct }}%
+                    </span>
+                  </div>
+                  <span class="text-muted" style="font-size: 11px;">{{ s.attendance_count }} sessions</span>
+                </td>
+                <td class="text-end pe-3">
+                  <button class="btn btn-sm btn-outline-primary me-1" onclick="openProfileModal({{ s.id }})" title="View Profile Summary">
+                    Profile Summary
+                  </button>
+                  <button class="btn btn-sm btn-outline-danger" onclick="deleteStudent({{ s.id }}, '{{ s.name|escape }}')" title="Delete Student">
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="6" class="text-center py-5 text-muted">
+                <h5>No students found matching your search.</h5>
+                <p class="small">Try clearing your filters or add a new student using the button above.</p>
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Student Profile Summary (View Only) -->
+<div class="modal fade" id="profileModal" tabindex="-1" aria-labelledby="profileModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content glass-surface border-0 shadow">
+      <div class="modal-header border-bottom-0 pb-0">
+        <div>
+          <h5 class="modal-header-title fw-bold mb-0" id="modalStudentName">Student Profile</h5>
+          <span class="text-muted small" id="modalStudentSub">Student Profile Summary (Read-Only)</span>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body pt-3">
+        <!-- Profile Overview Grid -->
+        <div class="row g-3 mb-4">
+          <div class="col-sm-4">
+            <div class="profile-stat-box">
+              <div class="small text-muted fw-semibold">Attendance Rate</div>
+              <div class="profile-stat-value" id="modalAttendancePct">0%</div>
+              <div class="small text-muted" id="modalAttendanceCount">0 classes attended</div>
+            </div>
+          </div>
+          <div class="col-sm-4">
+            <div class="profile-stat-box">
+              <div class="small text-muted fw-semibold">Biometrics Status</div>
+              <div class="profile-stat-value" id="modalFaceCount">0</div>
+              <div class="small text-muted">Face Embedding Vectors</div>
+            </div>
+          </div>
+          <div class="col-sm-4">
+            <div class="profile-stat-box">
+              <div class="small text-muted fw-semibold">Academic Standing</div>
+              <div class="profile-stat-value" id="modalEligibility" style="font-size: 1.15rem; padding-top: 6px;">Good</div>
+              <div class="small text-muted">GTU 75% Rule Compliance</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Student Metadata Details Table -->
+        <h6 class="fw-bold mb-2">Student Information</h6>
+        <div class="card bg-light border-0 p-3 mb-4">
+          <div class="row g-2 small">
+            <div class="col-sm-6"><strong>Roll Number:</strong> <span id="modalRoll">—</span></div>
+            <div class="col-sm-6"><strong>Enrollment / Reg No:</strong> <span id="modalRegNo">—</span></div>
+            <div class="col-sm-6"><strong>Class / Department:</strong> <span id="modalClass">—</span></div>
+            <div class="col-sm-6"><strong>Section / Division:</strong> <span id="modalSection">—</span></div>
+            <div class="col-sm-6"><strong>Email Address:</strong> <span id="modalEmail">—</span></div>
+            <div class="col-sm-6"><strong>Enrolled On:</strong> <span id="modalCreated">—</span></div>
+          </div>
+        </div>
+
+        <!-- Recent Attendance Log -->
+        <h6 class="fw-bold mb-2">Recent Attendance Sessions (Last 10)</h6>
+        <div class="table-responsive" style="max-height: 220px; overflow-y: auto;">
+          <table class="table table-sm table-striped small align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>Lecture / Class</th>
+                <th>Faculty</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="modalRecentLogs">
+              <tr><td colspan="4" class="text-center text-muted">Loading attendance logs...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer border-top-0 pt-0">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close Profile</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+const profileModal = new bootstrap.Modal(document.getElementById('profileModal'));
+
+async function openProfileModal(studentId) {
+  try {
+    const res = await fetch(`/students/${studentId}/summary`);
+    if (!res.ok) throw new Error("Could not fetch student summary");
+    const data = await res.json();
+    const st = data.student;
+
+    document.getElementById("modalStudentName").innerText = st.name;
+    document.getElementById("modalStudentSub").innerText = `Division: ${st.class || ''} ${st.section || ''} · Roll: ${st.roll || '—'}`;
+    document.getElementById("modalRoll").innerText = st.roll || "—";
+    document.getElementById("modalRegNo").innerText = st.reg_no || "—";
+    document.getElementById("modalClass").innerText = st.class || "—";
+    document.getElementById("modalSection").innerText = st.section || "—";
+    document.getElementById("modalEmail").innerText = st.email || "—";
+    document.getElementById("modalCreated").innerText = st.created_at ? st.created_at.substring(0, 10) : "—";
+
+    document.getElementById("modalAttendancePct").innerText = `${data.attendance_pct}%`;
+    document.getElementById("modalAttendanceCount").innerText = `${data.attendance_count} / ${data.total_classes} sessions`;
+    document.getElementById("modalFaceCount").innerText = `${data.face_count} Samples`;
+
+    const eligElem = document.getElementById("modalEligibility");
+    if (data.attendance_pct >= 75) {
+      eligElem.innerHTML = '<span class="text-success">✓ Eligible (≥75%)</span>';
+    } else if (data.attendance_pct >= 60) {
+      eligElem.innerHTML = '<span class="text-warning">⚠ Warning (<75%)</span>';
+    } else {
+      eligElem.innerHTML = '<span class="text-danger">✕ Critical (<60%)</span>';
+    }
+
+    const logsBody = document.getElementById("modalRecentLogs");
+    logsBody.innerHTML = "";
+    if (data.recent_logs && data.recent_logs.length > 0) {
+      data.recent_logs.forEach(log => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td><code>${log.timestamp}</code></td>
+          <td><strong>${log.class_name}</strong></td>
+          <td>${log.faculty}</td>
+          <td><span class="badge bg-success">PRESENT</span></td>
+        `;
+        logsBody.appendChild(row);
+      });
+    } else {
+      logsBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">No attendance records logged yet.</td></tr>';
+    }
+
+    profileModal.show();
+  } catch (err) {
+    alert("Error loading student summary: " + err.message);
+  }
+}
+
+async function deleteStudent(studentId, name) {
+  if (!confirm(`Are you sure you want to delete student "${name}"? This will permanently delete their biometric face data and records.`)) {
+    return;
+  }
+  try {
+    const res = await fetch(`/students/${studentId}`, {
+      method: "DELETE",
+      headers: { "X-CSRFToken": csrfToken }
+    });
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      const err = await res.json();
+      alert("Delete failed: " + (err.error || "Server error"));
+    }
+  } catch (err) {
+    alert("Delete failed: " + err.message);
+  }
+}
+</script>
+</body>
+</html>

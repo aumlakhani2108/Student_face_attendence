@@ -78,7 +78,7 @@ def test_admin_login_protects_pages_and_apis(client):
     assert client.get("/students").status_code == 401
     login_page = client.get("/login")
     assert login_page.status_code == 200
-    assert b"Attendly" in login_page.data
+    assert b"BioBytes" in login_page.data
     assert b'id="username"' in login_page.data
     assert b'id="password"' in login_page.data
     assert login(client).status_code == 302
@@ -1103,3 +1103,65 @@ def test_production_safety_checks(monkeypatch, tmp_path):
     importlib.reload(app_mod)
 
 
+
+
+def test_student_login_with_reg_no(client):
+    login(client)
+    res = client.post(
+        "/add_student",
+        data={
+            "name": "Rohan Sharma",
+            "roll": "15",
+            "reg_no": "246230316078",
+            "class": "IT",
+            "sec": "A",
+            "email": "rohan@example.com",
+            "password": "rohanpassword",
+        },
+    )
+    assert res.status_code == 200
+    client.post("/logout")
+
+    # Log in using Registration / Enrollment Number instead of roll
+    step1 = client.post("/login", data={"username": "246230316078", "password": "rohanpassword", "login_type": "student"})
+    assert step1.status_code == 302
+    assert "/verify-otp" in step1.headers["Location"]
+
+
+def test_manage_students_page_and_summary(client):
+    login(client)
+    # Add two students in different divisions
+    client.post("/add_student", data={"name": "Alice A", "roll": "1", "class": "IT", "sec": "A", "reg_no": "REG1"})
+    client.post("/add_student", data={"name": "Bob B", "roll": "2", "class": "CS", "sec": "B", "reg_no": "REG2"})
+
+    # Check manage_students page
+    resp = client.get("/manage_students")
+    assert resp.status_code == 200
+    assert b"Student Directory" in resp.data
+    assert b"Alice A" in resp.data
+    assert b"Bob B" in resp.data
+
+    # Check filter by division
+    resp_filtered = client.get("/manage_students?division=IT+-+A")
+    assert resp_filtered.status_code == 200
+    assert b"Alice A" in resp_filtered.data
+
+    # Check sort by division
+    resp_sorted = client.get("/manage_students?sort=division_asc")
+    assert resp_sorted.status_code == 200
+
+    # Check student summary API
+    summary_resp = client.get("/students/1/summary")
+    assert summary_resp.status_code == 200
+    json_data = summary_resp.json
+    assert "student" in json_data
+    assert "attendance_pct" in json_data
+    assert "face_count" in json_data
+
+
+def test_smtp_diagnostic_route(client):
+    login(client)
+    resp = client.post("/test_smtp", data={"email": "test@example.com"})
+    assert resp.status_code == 200
+    assert "success" in resp.json
+    assert "message" in resp.json

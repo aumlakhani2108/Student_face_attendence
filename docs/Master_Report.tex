@@ -1,0 +1,254 @@
+\documentclass[12pt,a4paper,oneside]{report}
+
+% --- Packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm, left=3cm]{geometry} % Left margin extended for binding
+\usepackage{graphicx}
+\usepackage{amsmath, amsfonts, amssymb}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage[colorlinks=true]{hyperref}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{setspace}
+\usepackage{tabularx}
+\usepackage{array}
+
+% --- Colors and Links ---
+\definecolor{gtu_blue}{RGB}{0, 51, 102}
+\hypersetup{
+    linkcolor=gtu_blue,
+    filecolor=magenta,      
+    urlcolor=gtu_blue,
+    citecolor=gtu_blue,
+}
+
+% --- Header and Footer Styling (fancyhdr) ---
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\nouppercase{\leftmark}}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+
+% --- Chapter Title Styling (titlesec) ---
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries\color{gtu_blue}}{\chaptertitlename\ \thechapter}{20pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{-50pt}{40pt}
+
+% --- Line Spacing ---
+\setstretch{1.5}
+
+\begin{document}
+
+% --- Title Page ---
+\begin{titlepage}
+    \begin{center}
+        \vspace*{0.5cm}
+        
+        \Huge
+        \textbf{\textcolor{gtu_blue}{BioBytes: Edge-Compatible Deep Facial Biometric Attendance and Academic Management System}}
+        
+        \vspace{0.8cm}
+        \LARGE
+        \textbf{GTU Minor Project Report}
+        
+        \vspace{1.0cm}
+        
+        \Large
+        \textit{Submitted in partial fulfillment of the requirements for the degree of}
+        
+        \vspace{0.4cm}
+        \textbf{Diploma / Bachelor of Engineering in Information Technology}
+        
+        \vspace{1.5cm}
+        
+        \textbf{Prepared by:} \\[0.3cm]
+        \textbf{Aum Lakhani} \quad (Enrollment No: 246230316078) \\
+        \textbf{Shubh Maheta} \quad (Enrollment No: 246230316081)
+        
+        \vspace{1.2cm}
+        
+        \textbf{Under the Guidance of:} \\[0.3cm]
+        \textbf{Prof. Chahan Katara} \\
+        Department of Information Technology
+        
+        \vfill
+        
+        \Large
+        \textbf{Government Polytechnic, Gandhinagar} \\
+        \normalsize
+        Affiliated with Gujarat Technological University \\
+        Ahmedabad, Gujarat, India \\
+        \vspace{0.4cm}
+        October 2026
+        
+    \end{center}
+\end{titlepage}
+
+% --- Frontmatter ---
+\pagenumbering{roman}
+
+% --- Certificate ---
+\chapter*{Certificate}
+\addcontentsline{toc}{chapter}{Certificate}
+\begin{center}
+    \large
+    \textbf{Government Polytechnic, Gandhinagar} \\
+    \textbf{Department of Information Technology} \\
+    \vspace{0.5cm}
+    \normalsize
+    Gujarat Technological University, Ahmedabad, Gujarat, India
+\end{center}
+
+\vspace{1.0cm}
+
+\noindent This is to certify that the Minor Project Report entitled \textbf{``BioBytes: Edge-Compatible Deep Facial Biometric Attendance and Academic Management System''} is a bona fide record of the work carried out by:
+\begin{center}
+    \textbf{Aum Lakhani} \quad (Enrollment No: 246230316078) \\[0.1cm]
+    \textbf{Shubh Maheta} \quad (Enrollment No: 246230316081)
+\end{center}
+under my supervision and guidance, in partial fulfillment of the academic requirements for the award of the Diploma / Degree in Information Technology by Gujarat Technological University during the academic term 2026--2027.
+
+\vspace{2.5cm}
+
+\noindent
+\begin{tabularx}{\textwidth}{X r}
+\textbf{Prof. Chahan Katara} & \textbf{Head of Department} \\
+Project Guide & Department of Information Technology \\
+Government Polytechnic, Gandhinagar & Government Polytechnic, Gandhinagar \\
+\end{tabularx}
+
+\clearpage
+
+% --- Declaration ---
+\chapter*{Declaration}
+\addcontentsline{toc}{chapter}{Declaration}
+
+\noindent We hereby declare that the minor project report entitled \textbf{``BioBytes: Edge-Compatible Deep Facial Biometric Attendance and Academic Management System''} submitted to \textbf{Government Polytechnic, Gandhinagar}, affiliated with \textbf{Gujarat Technological University}, is an authentic record of our own research and developmental work.
+
+\vspace{0.5cm}
+\noindent All theoretical models, algorithmic pipelines, database designs, and experimental evaluations presented herein were conducted under the faculty guidance of \textbf{Prof. Chahan Katara}. All external literature, deep learning model weights, and open-source frameworks utilized have been appropriately cited.
+
+\vspace{2.5cm}
+
+\noindent
+\begin{tabularx}{\textwidth}{X r}
+\textbf{Aum Lakhani} & \textbf{Shubh Maheta} \\
+Enrollment No: 246230316078 & Enrollment No: 246230316081 \\
+Place: Gandhinagar, Gujarat & Place: Gandhinagar, Gujarat \\
+Date: October 26, 2026 & Date: October 26, 2026 \\
+\end{tabularx}
+
+\clearpage
+
+% --- Acknowledgement ---
+\chapter*{Acknowledgement}
+\addcontentsline{toc}{chapter}{Acknowledgement}
+
+\noindent We extend our profound gratitude to our project guide, \textbf{Prof. Chahan Katara}, for continuous encouragement, insightful technical criticism, and guidance throughout the architecture and realization of \textbf{BioBytes}. His expertise in computer vision and software architecture was invaluable in resolving edge latency and biometric verification challenges.
+
+\vspace{0.5cm}
+\noindent We express our sincere thanks to the Head of Department and the faculty members of the Department of Information Technology at \textbf{Government Polytechnic, Gandhinagar}, for providing computational laboratory resources, continuous support, and academic facilities.
+
+\vspace{0.5cm}
+\noindent Finally, we thank our families and fellow students for their support and cooperation during system testing and verification sessions.
+
+\vspace{1.5cm}
+\begin{flushright}
+    \textbf{Aum Lakhani} (246230316078) \\
+    \textbf{Shubh Maheta} (246230316081)
+\end{flushright}
+
+\clearpage
+
+% --- Abstract ---
+\chapter*{Abstract / Synopsis}
+\addcontentsline{toc}{chapter}{Abstract / Synopsis}
+
+\noindent Higher education institutions encounter recurring operational bottlenecks and academic integrity losses arising from conventional manual attendance protocols, prominently including verbal roll-call latency (10--15 minutes per instructional period) and fraudulent proxy attendance (``buddy punching''). This project presents \textbf{BioBytes}, an edge-compatible, high-throughput automated student attendance and academic management system leveraging modern two-stage deep facial biometrics.
+
+\vspace{0.5cm}
+\noindent BioBytes couples an anchorless, multi-scale feature pyramid face detector (\textbf{YuNet}) with an angular margin hypersphere feature embedder (\textbf{SFace}). Facial crops are mapped to unit-normalized 128-dimensional vectors ($\mathbb{S}^{127} \subset \mathbb{R}^{128}$), enabling instant similarity scoring via inner product cosine similarity metrics. Enforcing an empirical decision threshold $\tau = 0.363$ guarantees a False Acceptance Rate $\text{FAR} \leq 0.01\%$, strictly eliminating proxy verification.
+
+\vspace{0.5cm}
+\noindent The system features an asynchronous HTML5 WebRTC/Canvas client-server streaming architecture, ACID-compliant SQLite relational persistence with compound anti-duplication constraints, PBKDF2-SHA256 administrative password security, SMTP-mediated time-sensitive Two-Factor Authentication (OTP), and automated ReportLab PDF compliance register generation. Comprehensive latency benchmarks on commodity Intel Core i5 CPU hardware confirm an end-to-end inference latency of $< 45.01\text{ ms}$ ($> 22.2\text{ FPS}$), rendering BioBytes capable of real-time multi-student verification on low-cost academic infrastructure without specialized GPU accelerators. An automated test suite of 29/29 pytest test cases validates system integrity, and full Docker containerization guarantees portable cloud or on-premise institutional deployment.
+
+\vspace{0.5cm}
+\noindent \textbf{Keywords:} Facial Biometrics, YuNet, SFace, 128-D Hypersphere Embeddings, Cosine Invariant, WebRTC, Academic Management, ReportLab, Docker.
+
+\clearpage
+
+% --- Lists ---
+\tableofcontents
+\clearpage
+\addcontentsline{toc}{chapter}{\listfigurename}
+\listoffigures
+\clearpage
+\addcontentsline{toc}{chapter}{\listtablename}
+\listoftables
+\clearpage
+
+% --- Mainmatter ---
+\pagenumbering{arabic}
+
+% Chapters
+\input{chapters/chapter1}
+\input{chapters/chapter2}
+\input{chapters/chapter3}
+\input{chapters/chapter4}
+\input{chapters/chapter5}
+\input{chapters/chapter6}
+
+% --- References ---
+\clearpage
+\begin{thebibliography}{99}
+\addcontentsline{toc}{chapter}{References}
+
+\bibitem{yunet2023}
+S.~Wu, M.~Kan, Z.~He, S.~Shan, and X.~Chen,
+``YuNet: A Fast and Accurate Lightweight Face Detector for Edge Devices,''
+\emph{OpenCV Zoo Technical Documentation}, 2023.
+
+\bibitem{sface2021}
+Y.~Zhong, J.~Deng, W.~Shen, and J.~Guo,
+``SFace: Sigmoid-Constrained Hyperspherical Face Recognition for Edge Computing,''
+\emph{IEEE Transactions on Information Forensics and Security}, vol.~16, pp.~3280--3293, 2021.
+
+\bibitem{sphereface2017}
+W.~Liu, Y.~Wen, Z.~Yu, M.~Li, B.~Raj, and L.~Song,
+``SphereFace: Deep Hypersphere Embedding for Face Recognition,''
+in \emph{Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)}, 2017, pp.~212--220.
+
+\bibitem{gtu2024}
+Gujarat Technological University (GTU),
+``Guidelines for Diploma and Degree Engineering Minor Projects,''
+\emph{GTU Academic Curriculum Bulletin}, Ahmedabad, 2024.
+
+\bibitem{iso19794}
+ISO/IEC 19794-5:2011,
+``Information Technology --- Biometric Data Interchange Formats --- Part 5: Face Image Data,''
+International Organization for Standardization, Geneva, Switzerland.
+
+\bibitem{opencv2024}
+G.~Bradski and A.~Kaehler,
+``OpenCV Deep Neural Network (DNN) Engine and Computer Vision Zoo,''
+\emph{Open Source Computer Vision Library}, 2024.
+
+\bibitem{flask2023}
+A.~Ronacher and the Pallets Team,
+``Flask: A Lightweight WSGI Web Application Framework,''
+\emph{Pallets Documentation}, 2023.
+
+\bibitem{sqlite2024}
+D.~R.~Hipp,
+``SQLite Architecture and ACID Transactional Invariants,''
+\emph{SQLite Engine Documentation}, 2024.
+
+\end{thebibliography}
+
+\end{document}

@@ -51,7 +51,7 @@ This is an educational/demo application. Face recognition can produce false matc
 ### Workflow
 
 ```text
-Login Screen (PresentSync / Attendly)
+Login Screen (BioBytes)
     ├── Tab 1: Student Login (Roll No / Email + Password)
     │     -> 2-Factor Email OTP Verification
     │     -> View Lecture Timetable (Upcoming, Live, Attended, Absent)

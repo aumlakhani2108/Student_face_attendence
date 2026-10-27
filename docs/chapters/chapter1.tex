@@ -1,0 +1,47 @@
+\chapter{Introduction}
+
+\section{The Classroom Attendance Landscape and Operational Challenges}
+Classroom attendance tracking forms an indispensable operational pillar within academic institutions, establishing verifiable audit trails for accreditation boards, continuous student evaluations, and statutory attendance mandates. Historically, higher education institutions have relied primarily on manual pen-and-paper registers or verbal roll calls. Empirical operational time-and-motion studies within polytechnic and engineering colleges reveal that verbal roll calls in standard cohorts of 60 to 75 students consume between 10 to 15 minutes per lecture hour. In an academic schedule featuring six daily instructional periods, this traditional protocol dissipates up to 15--20\% of productive instructional time.
+
+Beyond latency and operational overhead, conventional attendance collection suffers from systemic vulnerabilities:
+\begin{itemize}
+    \item \textbf{Buddy Punching and Proxy Attendance:} Physical sign-in sheets and manual calls facilitate identity fraud, where absent students are routinely marked present by peers without verification.
+    \item \textbf{Data Transcription Lag:} Paper records necessitate secondary manual data entry into centralized enterprise resource planning (ERP) or management information systems (MIS), introducing transcription errors, delay in anomaly detection, and lack of real-time parent-institution visibility.
+    \item \textbf{Physical Degradation and Audit Vulnerability:} Paper registers are prone to physical loss, tampering, and degradation over academic terms, compromising regulatory compliance audits.
+\end{itemize}
+
+\section{Project Rationale: BioBytes}
+To address these institutional inefficiencies, \textbf{BioBytes} is designed as an edge-compatible, automated digital attendance and academic management system utilizing high-performance deep facial biometrics. Rather than relying on legacy, computationally prohibitive neural networks or fragile classical computer vision methods (such as Haar cascades and eigenfaces), BioBytes deploys a modern two-stage convolutional pipeline:
+\begin{enumerate}
+    \item \textbf{YuNet Face Detection:} An ultra-lightweight, quantized convolutional neural network capable of millisecond-level face localization and 5-point facial landmark regression even under occlusion and non-uniform ambient illumination.
+    \item \textbf{SFace Biometric Recognition:} A deep sphere-embedding convolutional architecture that maps facial crops to unit-normalized 128-dimensional hyperspherical vectors ($\mathbb{S}^{127} \subset \mathbb{R}^{128}$), enabling instant similarity evaluation via cosine metric comparison.
+\end{enumerate}
+
+By integrating this neural vision pipeline with an asynchronous WebRTC browser capture interface, transactional SQLite relational storage, time-sensitive Two-Factor Authentication (Email OTP), and automated ReportLab PDF audit generation, BioBytes delivers zero-trust identity verification with minimal latency.
+
+\section{Problem Statement}
+The core engineering objective addressed by this project is formalized as follows:
+\begin{quote}
+\textit{``How can an academic institution enforce deterministic, zero-proxy student attendance verification in real-time under commodity hardware constraints, while guaranteeing sub-second biometric inference, rigorous data privacy, and verifiable audit generation?''}
+\end{quote}
+
+\section{Objectives}
+The primary technical and operational objectives of BioBytes are:
+\begin{enumerate}
+    \item \textbf{Sub-Second Multi-Stage Inference:} Implement a decoupled detection-alignment-embedding pipeline achieving $< 50\text{ ms}$ total frame processing latency on commodity CPU hardware ($> 20\text{ FPS}$).
+    \item \textbf{Deterministic Biometric Matching:} Project facial geometry onto a 128-dimensional hypersphere, utilizing an empirical cosine similarity threshold ($\tau \approx 0.363$) that strictly minimizes the False Acceptance Rate ($\text{FAR} \leq 0.01\%$) to eliminate proxy attendance.
+    \item \textbf{Browser-Agnostic Edge Capture:} Provide a responsive, hardware-accelerated HTML5 Canvas/WebRTC client interface compatible with standard classroom webcams and mobile devices without requiring dedicated biometric hardware scanners.
+    \item \textbf{Transactional Integrity and Anti-Duplication:} Enforce database-level uniqueness constraints ($\text{student\_id} \times \text{date} \times \text{class\_id}$) to eliminate duplicate logging during continuous video streaming.
+    \item \textbf{Role-Based Administrative Security:} Secure administrative endpoints via salted PBKDF2-SHA256 password hashing and SMTP-mediated time-sensitive One-Time Passwords (OTP).
+    \item \textbf{Automated Compliance Reporting:} Produce automated, tamper-resistant PDF attendance registers with statistical attendance percentage summaries.
+\end{enumerate}
+
+\section{Scope and Ethical Considerations}
+BioBytes is engineered specifically for institutional deployment in classrooms, computational laboratories, and examination halls. 
+
+\subsection{Biometric Privacy and Data Sovereignty}
+A paramount ethical consideration in biometric systems is the preservation of student privacy:
+\begin{itemize}
+    \item \textbf{Zero Raw-Image Retention:} During both enrollment and operational attendance sessions, captured video frames are processed in-memory. Raw pixel matrices are never persisted to secondary disk storage.
+    \item \textbf{Cryptographic Vector Representation:} Identity profiles are stored strictly as 128-dimensional floating-point numerical vectors. Because deep convolutional embeddings are non-invertible mathematical projections, raw face images cannot be mathematically reconstructed from stored vectors, effectively immunizing the institution against visual biometric data leakage.
+\end{itemize}

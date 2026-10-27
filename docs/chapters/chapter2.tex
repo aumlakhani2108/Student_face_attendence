@@ -1,0 +1,64 @@
+\chapter{System Architecture and Biometric Pipeline}
+
+\section{Decoupled Two-Stage Deep Vision Architecture}
+Traditional facial recognition systems frequently amalgamate localization and recognition into a monolithic, computationally cumbersome architecture. In contrast, \textbf{BioBytes} adopts a decoupled, two-stage deep vision pipeline optimized for real-time edge CPU inference. 
+
+\begin{figure}[htbp]
+\centering
+\small
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{|c|c|c|c|}
+\hline
+\textbf{Pipeline Stage} & \textbf{Core Module} & \textbf{Primary Operation} & \textbf{Output Artifact} \\
+\hline
+Stage 0 & Client Browser (WebRTC) & Hardware Video Capture \& Canvas Extraction & Base64 JPEG Data URL \\
+Stage 1 & YuNet Deep Detector & Multi-scale Feature Pyramid + Anchorless Head & Bounding Box + 5 Landmarks \\
+Stage 2 & Affine Alignment & 5-point Euclidean Similarity Transform & Normalized $112 \times 112$ Crop \\
+Stage 3 & SFace Deep Recognizer & SphereFace Convolutional Feature Backbone & $\mathbf{v} \in \mathbb{S}^{127} \subset \mathbb{R}^{128}$ \\
+Stage 4 & Cosine Decision Engine & Metric Dot Product against Vector Store & Identity Label ($S_C \geq \tau$) \\
+Stage 5 & Database Persistence & ACID-Compliant Transactional Commits & Timestamped Attendance Record \\
+\hline
+\end{tabular}
+\caption{The BioBytes End-to-End Processing Architecture}
+\label{fig:pipeline_table}
+\end{figure}
+
+By structurally separating face localization from high-dimensional feature embedding, the system executes localization at 60 FPS while reserving intensive embedding computations exclusively for frames satisfying high detector confidence ($\text{confidence} \geq 0.70$).
+
+\section{Deep Model Specifications: YuNet and SFace}
+
+\subsection{Stage 1: YuNet Fast Face Detector}
+YuNet is an ultra-fast, lightweight convolutional network designed specifically for edge devices and mobile processors:
+\begin{itemize}
+    \item \textbf{Input Resolution:} Dynamic multi-scale input; standard operational resolution configured at $320 \times 320$ pixels for optimal throughput.
+    \item \textbf{Feature Pyramid Network (FPN):} Integrates low-level spatial detail with high-level semantic context to accurately detect diminutive or occluded faces.
+    \item \textbf{Anchorless Detection Head:} Directly regresses bounding box coordinates $(x, y, w, h)$, detection confidence score $s \in [0, 1]$, and five critical facial landmarks: right eye, left eye, nose tip, right mouth corner, and left mouth corner:
+    \begin{equation}
+    \mathbf{L} = \left\{ (x_{\text{re}}, y_{\text{re}}), (x_{\text{le}}, y_{\text{le}}), (x_{\text{nt}}, y_{\text{nt}}), (x_{\text{rm}}, y_{\text{rm}}), (x_{\text{lm}}, y_{\text{lm}}) \right\}
+    \end{equation}
+\end{itemize}
+
+\subsection{Stage 2: SFace Facial Feature Extractor}
+SFace is a deep convolutional neural network based on the SphereFace / CosFace hyperspherical margin objective:
+\begin{itemize}
+    \item \textbf{Canonical Input:} Aligned facial crop of dimensions $112 \times 112 \times 3$.
+    \item \textbf{Hyperspherical Margin Loss:} Unlike standard cross-entropy, SFace enforces angular margins in the latent embedding space, compressing intra-class variance while expanding inter-class separation.
+    \item \textbf{Output Representation:} Unit-normalized 128-dimensional continuous vector $\mathbf{v} \in \mathbb{R}^{128}$ such that $\|\mathbf{v}\|_2 = 1.0$.
+\end{itemize}
+
+\section{Event-Driven Client-Server Streaming Protocol}
+BioBytes eliminates the operational necessity of native client desktop installations by leveraging standard web protocols:
+\begin{enumerate}
+    \item \textbf{MediaDevices Stream Acquisition:} The HTML5 `navigator.mediaDevices.getUserMedia` API initializes the client camera sensor with automated aspect ratio and white-balance calibration.
+    \item \textbf{Virtual Canvas Rasterization:} Video stream frames are periodically rasterized onto an off-screen HTML5 `Canvas` element at a throttled sampling frequency (typically 500 ms interval to balance server bandwidth and responsiveness).
+    \item \textbf{Base64 Asynchronous Dispatch:} The rasterized frame is compressed into a JPEG byte payload and dispatched to the Flask backend via `Fetch` API POST requests with JSON metadata (`class_id`, `subject`, `session_token`).
+    \item \textbf{Non-Blocking In-Memory Pipeline:} The Flask WSGI server intercepts the payload, executes base64-to-OpenCV buffer decoding directly in volatile RAM, executes inference, and responds with a JSON match status payload within $< 50\text{ ms}$.
+\end{enumerate}
+
+\section{Real-Time Liveness and Anti-Spoofing Protocol}
+Biometric verification systems are intrinsically susceptible to presentation attacks, notably high-resolution printed photographs and digital video replays on secondary mobile displays. BioBytes incorporates a temporal multi-frame heuristic protocol:
+\begin{itemize}
+    \item \textbf{Blink-State Temporal Analysis:} Eye aspect ratio (EAR) fluctuation monitoring across contiguous video frames validates natural biological blinking.
+    \item \textbf{Landmark Variance Metric:} Bounding box and landmark displacement vectors are tracked across $k=3$ successive evaluation windows. Static photographs exhibit zero coordinate jitter ($\Delta \mathbf{L} \approx \mathbf{0}$), triggering an automated spoof rejection flag.
+    \item \textbf{Dynamic Optical Flow Gradient:} Natural biological micro-movements induce local gradient shifts absent in rigid presentation surfaces.
+\end{itemize}
